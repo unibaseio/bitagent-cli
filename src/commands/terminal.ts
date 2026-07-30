@@ -349,7 +349,22 @@ async function send(
   }
 
   if (wroteHeader) process.stdout.write("\n");
-  return text;
+  if (text.trim()) return text;
+
+  // The AIP deployment currently answers /invoke/{id}/stream with an empty 200
+  // text/event-stream: no events, closed in about a second. Streaming is the
+  // default, so taking that at face value would leave the user staring at a
+  // silent prompt. Retry once on the non-streaming endpoint, which does answer.
+  if (process.env.BITAGENT_DEBUG) {
+    out.hint("empty event-stream — retrying on /invoke");
+  }
+  const response = await aip.invoke(agentId, body, credentials.token);
+  const content = String(response.content ?? "");
+  if (content && !out.isJsonMode()) {
+    process.stdout.write(out.pc.bold("agent › ") + content + "\n");
+    if (response.cost) out.hint(`cost: ${String(response.cost)}`);
+  }
+  return content;
 }
 
 function renderMessage(message: ChatMessage): void {
