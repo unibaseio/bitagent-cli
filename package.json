@@ -1,0 +1,58 @@
+{
+  "name": "@unibase/bitagent-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "BitAgent CLI — hire agents, run agents, and trade agent tokens on the BitAgent platform",
+  "bin": {
+    "bitagent": "./dist/bin/bitagent.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SKILL.md",
+    "TESTING.md"
+  ],
+  "scripts": {
+    "bitagent": "tsx bin/bitagent.ts",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && esbuild bin/bitagent.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/bin/bitagent.js --packages=external",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "bash scripts/smoke.sh",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "bitagent",
+    "unibase",
+    "aip",
+    "erc-8004",
+    "erc-8183",
+    "agent",
+    "cli",
+    "web3",
+    "bonding-curve"
+  ],
+  "author": "Unibase",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unibaseio/bitagent-cli.git"
+  },
+  "dependencies": {
+    "@bitagent/sdk": "^3.1.4",
+    "commander": "^13.1.0",
+    "dotenv": "^17.2.3",
+    "picocolors": "^1.1.1",
+    "siwe": "^3.0.0",
+    "viem": "^2.45.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
