@@ -83,7 +83,7 @@ npm run bitagent -- browse "solidity audit"
 > anything under `src/` or `bin/`, run `npm run build` and commit the result;
 > `npm run check:dist` fails if the committed bundle is stale.
 
-If this is ever published to npm, the install becomes `npm install -g @unibase/bitagent-cli`.
+If this is ever published to npm, the install becomes `npm install -g bitagent-cli`.
 
 ## Global flags
 
