@@ -5,7 +5,7 @@ run your own agent for pay, settle work through ERC-8183 escrow, and launch or t
 agent tokens on the bonding curve.
 
 ```bash
-npm install -g github:unibaseio/bitagent-cli
+npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
 bitagent configure
 ```
 
@@ -37,29 +37,42 @@ machine that already authorized a Python / Go / TypeScript AIP SDK is authorized
 This package is **not on the npm registry** — GitHub is the source. Node 20+ required.
 
 ```bash
-npm install -g github:unibaseio/bitagent-cli
+npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
 bitagent --version
 ```
 
-Re-run the same command to upgrade. Pin a branch, tag or commit with a git ref:
+Pin a release instead of tracking `main`:
 
 ```bash
-npm install -g github:unibaseio/bitagent-cli#main
-npm install -g github:unibaseio/bitagent-cli#v0.1.0
+npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/tags/v0.1.0.tar.gz
 ```
+
+To upgrade, re-run the command. Add `--prefer-online` if npm serves you a cached copy of
+the same URL.
 
 One-off, without installing:
 
 ```bash
-npx github:unibaseio/bitagent-cli configure
+npx -y https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz configure
 ```
 
 As a dependency of another project, rather than a global command:
 
 ```bash
-npm install github:unibaseio/bitagent-cli
+npm install https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
 npx bitagent --help
 ```
+
+> **Why the archive URL rather than `npm install -g github:unibaseio/bitagent-cli`?**
+> The `github:` shorthand makes npm treat the package as a *git dependency*, which it
+> prepares by cloning into its cache and running a build there. That step is fragile: on
+> npm 10.x under nvm it can fail outright (`git dep preparation failed`) or, worse, succeed
+> while symlinking the installed package at a temp clone inside `_cacache` that is deleted
+> moments later — leaving `added 1 package`, exit code 0, and a `bitagent: command not
+> found`. It is not specific to this package (`npm install -g github:isaacs/rimraf` fails
+> the same way in that environment). The archive URL is a plain tarball, so npm packs and
+> extracts it like any registry package. Use the `github:` form if you prefer and it works
+> for you — the package supports both.
 
 **From a checkout** — the development path:
 
@@ -76,12 +89,17 @@ While developing, skip the build entirely:
 npm run bitagent -- browse "solidity audit"
 ```
 
-> **`dist/` is committed to the repo, on purpose.** `npm install -g` from a git URL does
-> not install devDependencies — not even with `--include=dev` — so esbuild is unavailable
-> and the bundle cannot be built at install time. Shipping the prebuilt
-> `dist/bin/bitagent.js` is what makes the one-line install above work. If you change
-> anything under `src/` or `bin/`, run `npm run build` and commit the result;
-> `npm run check:dist` fails if the committed bundle is stale.
+> **`dist/` is committed to the repo, on purpose, and the bundle has no runtime
+> dependencies.** Installing from GitHub never runs a build — npm installs no
+> devDependencies for that, so esbuild is not available — which is why the prebuilt
+> `dist/bin/bitagent.js` ships in the repo. It is also fully bundled (`dependencies` is
+> empty): `@bitagent/sdk` pulls in `aws-sdk` v2, whose `postinstall` breaks global installs,
+> and bundling removes that whole tree. So `npm install -g` fetches one package, runs no
+> scripts, and cannot fail on a transitive dependency.
+>
+> The cost is that a stale bundle would ship silently. If you change anything under `src/`
+> or `bin/`, run `npm run build` and commit the result — `npm run check:dist` rebuilds and
+> fails if the committed bundle does not match the source.
 
 If this is ever published to npm, the install becomes `npm install -g bitagent-cli`.
 

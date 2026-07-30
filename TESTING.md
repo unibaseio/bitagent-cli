@@ -64,32 +64,48 @@ is installed from GitHub rather than npm, the install path has its own failure m
 worth checking by hand whenever `src/` changes.
 
 ```bash
+TARBALL=https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+
 # 1. The committed bundle matches the source.
 npm run check:dist          # exits non-zero if dist/ is stale — rebuild and commit
 
-# 2. Global install, into a throwaway prefix so your real global stays untouched.
-rm -rf /tmp/bg && npm install -g --prefix /tmp/bg github:unibaseio/bitagent-cli
-/tmp/bg/bin/bitagent --version
-/tmp/bg/bin/bitagent stats --json | head -5
+# 2. The bundle is genuinely self-contained: run it with no node_modules anywhere.
+rm -rf /tmp/iso && mkdir /tmp/iso && cp dist/bin/bitagent.js /tmp/iso/
+(cd /tmp/iso && node bitagent.js --version && node bitagent.js stats --json | head -3)
 
-# 3. One-off execution.
-npx -y github:unibaseio/bitagent-cli --version
+# 3. Global install.
+npm install -g "$TARBALL"
+which bitagent && bitagent --version && bitagent stats --json | head -3
+npm ls -g --depth=0 | grep bitagent      # must show bitagent-cli@0.1.0, WITH a version
 
-# 4. As a project dependency (this path *does* install devDeps and rebuild).
+# 4. One-off execution.
+npx -y "$TARBALL" --version
+
+# 5. As a project dependency.
 mkdir -p /tmp/bgdep && cd /tmp/bgdep && npm init -y >/dev/null
-npm install github:unibaseio/bitagent-cli
-./node_modules/.bin/bitagent --version
+npm install "$TARBALL" && ./node_modules/.bin/bitagent --version
 ```
 
-**Expect:** all four print `0.1.0` and step 2 reaches the live API. Step 1 is the one that
-catches the common mistake — editing `src/` and forgetting to rebuild, which ships a stale
-binary to everyone installing from GitHub.
+**Expect:** every step prints `0.1.0`, and steps 2–3 reach the live API. Step 2 is the one
+that catches a broken bundle — if a dependency stopped being bundled, it fails there rather
+than on a stranger's machine. Step 1 catches the likelier mistake: editing `src/` and
+forgetting to rebuild, which would ship a stale binary to everyone.
 
-**Watch for:** if step 2 succeeds but installs no executable, `prepare` failed. Re-run
-without hiding output: `npm install -g --prefix /tmp/bg --foreground-scripts
-github:unibaseio/bitagent-cli`. A global git install has no devDependencies, so `prepare`
-must fall back to the committed bundle rather than trying to build — see
-[scripts/prepare.mjs](scripts/prepare.mjs).
+**Watch for `added 1 package` with no working `bitagent`.** That is the failure mode of npm
+installing this as a *git* dependency instead of a tarball — check
+`ls -la $(npm config get prefix)/lib/node_modules/ | grep bitagent`. A symlink pointing into
+`_cacache/tmp/git-clone*` means npm linked its own temp clone, which it then deleted; and
+`npm ls -g` showing `bitagent-cli@` with an empty version is the same symptom. Use the
+archive URL, not `github:unibaseio/bitagent-cli` — see the note in
+[README.md](README.md#install).
+
+**Leftover dangling bin links** from a failed attempt cause the next install to abort with
+`EEXIST: file already exists`. Clear them:
+
+```bash
+P=$(npm config get prefix)
+rm -f "$P/bin/bitagent" "$P/bin/bitagent-cli" && rm -rf "$P/lib/node_modules/bitagent-cli"
+```
 
 ---
 
