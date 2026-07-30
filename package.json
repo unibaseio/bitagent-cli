@@ -21,7 +21,6 @@
     "typecheck": "tsc --noEmit",
     "test:smoke": "bash scripts/smoke.sh",
     "check:dist": "npm run build && git diff --exit-code --stat dist",
-    "prepare": "node scripts/prepare.mjs",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "engines": {
