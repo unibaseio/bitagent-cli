@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# dist/ is intentionally committed: `npm install -g github:unibaseio/bitagent-cli`
+# does not install devDependencies, so the bundle cannot be built at install time.
+# Rebuild with `npm run build` and verify with `npm run check:dist`.
 .env
 .env.*
 !.env.example

@@ -20,7 +20,8 @@
     "build": "npm run clean && esbuild bin/bitagent.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/bin/bitagent.js --packages=external",
     "typecheck": "tsc --noEmit",
     "test:smoke": "bash scripts/smoke.sh",
-    "prepare": "npm run build",
+    "check:dist": "npm run build && git diff --exit-code --stat dist",
+    "prepare": "node scripts/prepare.mjs",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "engines": {

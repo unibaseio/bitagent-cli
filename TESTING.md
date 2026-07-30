@@ -16,8 +16,7 @@ do behind your back.
 ## Automated suite (tiers 0 + 1)
 
 ```bash
-npm install
-npm run build
+npm install          # `prepare` builds dist/ automatically
 npm run test:smoke
 ```
 
@@ -57,6 +56,42 @@ failure. Credentials come from the environment, `~/.config/bitagent/config.json`
 `~/.config/unibase-aip-sdk/config.json`; the suite uses a throwaway
 `BITAGENT_CONFIG_DIR`, so it can read your credential but never writes to your real
 config.
+
+## Install verification — *free, do this after any release*
+
+The suite tests the code, not the distribution. Since `dist/` is committed and the package
+is installed from GitHub rather than npm, the install path has its own failure modes and is
+worth checking by hand whenever `src/` changes.
+
+```bash
+# 1. The committed bundle matches the source.
+npm run check:dist          # exits non-zero if dist/ is stale — rebuild and commit
+
+# 2. Global install, into a throwaway prefix so your real global stays untouched.
+rm -rf /tmp/bg && npm install -g --prefix /tmp/bg github:unibaseio/bitagent-cli
+/tmp/bg/bin/bitagent --version
+/tmp/bg/bin/bitagent stats --json | head -5
+
+# 3. One-off execution.
+npx -y github:unibaseio/bitagent-cli --version
+
+# 4. As a project dependency (this path *does* install devDeps and rebuild).
+mkdir -p /tmp/bgdep && cd /tmp/bgdep && npm init -y >/dev/null
+npm install github:unibaseio/bitagent-cli
+./node_modules/.bin/bitagent --version
+```
+
+**Expect:** all four print `0.1.0` and step 2 reaches the live API. Step 1 is the one that
+catches the common mistake — editing `src/` and forgetting to rebuild, which ships a stale
+binary to everyone installing from GitHub.
+
+**Watch for:** if step 2 succeeds but installs no executable, `prepare` failed. Re-run
+without hiding output: `npm install -g --prefix /tmp/bg --foreground-scripts
+github:unibaseio/bitagent-cli`. A global git install has no devDependencies, so `prepare`
+must fall back to the committed bundle rather than trying to build — see
+[scripts/prepare.mjs](scripts/prepare.mjs).
+
+---
 
 ## Tier 2 — manual, state-changing (BSC Testnet)
 

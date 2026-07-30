@@ -5,7 +5,7 @@ run your own agent for pay, settle work through ERC-8183 escrow, and launch or t
 agent tokens on the bonding curve.
 
 ```bash
-npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git
+npm install -g github:unibaseio/bitagent-cli
 bitagent configure
 ```
 
@@ -34,44 +34,39 @@ machine that already authorized a Python / Go / TypeScript AIP SDK is authorized
 
 ## Install
 
-This package is **not on the public npm registry** — GitHub is the source. The repo is
-private, so you need access to `unibaseio/bitagent-cli`: either an SSH key on your GitHub
-account, or a token (see HTTPS below). Node 20+ required.
+This package is **not on the npm registry** — GitHub is the source. Node 20+ required.
 
 ```bash
-npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git
+npm install -g github:unibaseio/bitagent-cli
 bitagent --version
 ```
 
-npm clones the repo, installs the dev dependencies, and runs the `prepare` script to build
-`dist/` — there is no separate build step. Re-run the same command to upgrade.
+Re-run the same command to upgrade. Pin a branch, tag or commit with a git ref:
+
+```bash
+npm install -g github:unibaseio/bitagent-cli#main
+npm install -g github:unibaseio/bitagent-cli#v0.1.0
+```
 
 One-off, without installing:
 
 ```bash
-npx git+ssh://git@github.com/unibaseio/bitagent-cli.git configure
+npx github:unibaseio/bitagent-cli configure
 ```
 
-Pin a branch, tag or commit by appending a git ref:
+As a dependency of another project, rather than a global command:
 
 ```bash
-npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git#main
-npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git#v0.1.0
-```
-
-**Over HTTPS** instead of SSH — for CI, or any machine without an SSH key. Use a personal
-access token with `repo` scope, and keep it in an env var rather than shell history:
-
-```bash
-npm install -g "git+https://${GITHUB_TOKEN}@github.com/unibaseio/bitagent-cli.git"
+npm install github:unibaseio/bitagent-cli
+npx bitagent --help
 ```
 
 **From a checkout** — the development path:
 
 ```bash
-git clone git@github.com:unibaseio/bitagent-cli.git
+git clone https://github.com/unibaseio/bitagent-cli.git
 cd bitagent-cli
-npm install       # `prepare` builds dist/ for you
+npm install       # `prepare` rebuilds dist/ for you
 npm link          # puts `bitagent` on your PATH, pointing at this checkout
 ```
 
@@ -81,8 +76,14 @@ While developing, skip the build entirely:
 npm run bitagent -- browse "solidity audit"
 ```
 
-If the repo is ever made public, the shorthand `npm install -g github:unibaseio/bitagent-cli`
-works as well. If it is ever published to npm, that becomes `npm install -g @unibase/bitagent-cli`.
+> **`dist/` is committed to the repo, on purpose.** `npm install -g` from a git URL does
+> not install devDependencies — not even with `--include=dev` — so esbuild is unavailable
+> and the bundle cannot be built at install time. Shipping the prebuilt
+> `dist/bin/bitagent.js` is what makes the one-line install above work. If you change
+> anything under `src/` or `bin/`, run `npm run build` and commit the result;
+> `npm run check:dist` fails if the committed bundle is stale.
+
+If this is ever published to npm, the install becomes `npm install -g @unibase/bitagent-cli`.
 
 ## Global flags
 
