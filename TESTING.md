@@ -104,12 +104,15 @@ installing this as a *git* dependency instead of a tarball — check
 archive URL, not `github:unibaseio/bitagent-cli` — see the note in
 [README.md](README.md#install).
 
-**Leftover dangling bin links** from a failed attempt cause the next install to abort with
-`EEXIST: file already exists`. Clear them:
+**`EEXIST: file already exists` on `bin/bitagent`** has two causes. Either a different
+package owns that executable — the unscoped `bitagent-cli` from a GitHub-tarball install, in
+which case `npm uninstall -g bitagent-cli` first — or a failed install left dangling
+symlinks behind, which no uninstall will clear because the package was never registered:
 
 ```bash
 P=$(npm config get prefix)
-rm -f "$P/bin/bitagent" "$P/bin/bitagent-cli" && rm -rf "$P/lib/node_modules/bitagent-cli"
+rm -f "$P/bin/bitagent" "$P/bin/bitagent-cli"
+rm -rf "$P/lib/node_modules/bitagent-cli" "$P/lib/node_modules/@unibaseio/bitagent-cli"
 ```
 
 ---

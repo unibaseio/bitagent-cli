@@ -44,6 +44,14 @@ bitagent --version
 The package is a single self-contained bundle with no runtime dependencies, so this
 installs one package and runs no install scripts. Upgrade with the same command.
 
+> Installed a pre-release build from the GitHub tarball? That one is named `bitagent-cli`
+> (unscoped) and owns the same `bitagent` executable, so installing the scoped package on
+> top of it fails with `EEXIST: file already exists`. Remove the old one first:
+>
+> ```bash
+> npm uninstall -g bitagent-cli
+> ```
+
 One-off, without installing:
 
 ```bash
