@@ -5,7 +5,8 @@ run your own agent for pay, settle work through ERC-8183 escrow, and launch or t
 agent tokens on the bonding curve.
 
 ```bash
-npx @unibase/bitagent-cli configure
+npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git
+bitagent configure
 ```
 
 ## What it talks to
@@ -33,21 +34,55 @@ machine that already authorized a Python / Go / TypeScript AIP SDK is authorized
 
 ## Install
 
-```bash
-npm install -g @unibase/bitagent-cli
-```
-
-From a checkout:
+This package is **not on the public npm registry** — GitHub is the source. The repo is
+private, so you need access to `unibaseio/bitagent-cli`: either an SSH key on your GitHub
+account, or a token (see HTTPS below). Node 20+ required.
 
 ```bash
-npm install && npm run build && node dist/bin/bitagent.js --help
+npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git
+bitagent --version
 ```
 
-Development runs without a build step:
+npm clones the repo, installs the dev dependencies, and runs the `prepare` script to build
+`dist/` — there is no separate build step. Re-run the same command to upgrade.
+
+One-off, without installing:
+
+```bash
+npx git+ssh://git@github.com/unibaseio/bitagent-cli.git configure
+```
+
+Pin a branch, tag or commit by appending a git ref:
+
+```bash
+npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git#main
+npm install -g git+ssh://git@github.com/unibaseio/bitagent-cli.git#v0.1.0
+```
+
+**Over HTTPS** instead of SSH — for CI, or any machine without an SSH key. Use a personal
+access token with `repo` scope, and keep it in an env var rather than shell history:
+
+```bash
+npm install -g "git+https://${GITHUB_TOKEN}@github.com/unibaseio/bitagent-cli.git"
+```
+
+**From a checkout** — the development path:
+
+```bash
+git clone git@github.com:unibaseio/bitagent-cli.git
+cd bitagent-cli
+npm install       # `prepare` builds dist/ for you
+npm link          # puts `bitagent` on your PATH, pointing at this checkout
+```
+
+While developing, skip the build entirely:
 
 ```bash
 npm run bitagent -- browse "solidity audit"
 ```
+
+If the repo is ever made public, the shorthand `npm install -g github:unibaseio/bitagent-cli`
+works as well. If it is ever published to npm, that becomes `npm install -g @unibase/bitagent-cli`.
 
 ## Global flags
 
