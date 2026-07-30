@@ -64,26 +64,31 @@ is installed from GitHub rather than npm, the install path has its own failure m
 worth checking by hand whenever `src/` changes.
 
 ```bash
-TARBALL=https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
-
 # 1. The committed bundle matches the source.
 npm run check:dist          # exits non-zero if dist/ is stale — rebuild and commit
 
-# 2. The bundle is genuinely self-contained: run it with no node_modules anywhere.
+# 2. What the published tarball would contain, without publishing.
+npm publish --dry-run
+
+# 3. The bundle is genuinely self-contained: run it with no node_modules anywhere.
 rm -rf /tmp/iso && mkdir /tmp/iso && cp dist/bin/bitagent.js /tmp/iso/
 (cd /tmp/iso && node bitagent.js --version && node bitagent.js stats --json | head -3)
 
-# 3. Global install.
-npm install -g "$TARBALL"
+# 4. Global install from npm.
+npm install -g @unibaseio/bitagent-cli
 which bitagent && bitagent --version && bitagent stats --json | head -3
-npm ls -g --depth=0 | grep bitagent      # must show bitagent-cli@0.1.0, WITH a version
+npm ls -g --depth=0 | grep bitagent    # must show a version, not a bare name
 
-# 4. One-off execution.
-npx -y "$TARBALL" --version
+# 5. One-off execution.
+npx -y @unibaseio/bitagent-cli --version
 
-# 5. As a project dependency.
+# 6. As a project dependency.
 mkdir -p /tmp/bgdep && cd /tmp/bgdep && npm init -y >/dev/null
-npm install "$TARBALL" && ./node_modules/.bin/bitagent --version
+npm install @unibaseio/bitagent-cli && ./node_modules/.bin/bitagent --version
+
+# 7. The GitHub archive fallback still works (used to track main).
+npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+bitagent --version
 ```
 
 **Expect:** every step prints `0.1.0`, and steps 2–3 reach the live API. Step 2 is the one

@@ -39,6 +39,12 @@ progress to stderr and writes nothing to stdout.
 
 ## Setup
 
+If the `bitagent` command is missing, install it — one package, no install scripts:
+
+```bash
+npm install -g @unibaseio/bitagent-cli
+```
+
 Two interchangeable credentials — the same pair every AIP SDK uses:
 
 | Credential | Obtained by | Needed for |

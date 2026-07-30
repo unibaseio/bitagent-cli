@@ -5,7 +5,7 @@ run your own agent for pay, settle work through ERC-8183 escrow, and launch or t
 agent tokens on the bonding curve.
 
 ```bash
-npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+npm install -g @unibaseio/bitagent-cli
 bitagent configure
 ```
 
@@ -34,45 +34,41 @@ machine that already authorized a Python / Go / TypeScript AIP SDK is authorized
 
 ## Install
 
-This package is **not on the npm registry** — GitHub is the source. Node 20+ required.
+Node 20+ required.
 
 ```bash
-npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+npm install -g @unibaseio/bitagent-cli
 bitagent --version
 ```
 
-Pin a release instead of tracking `main`:
-
-```bash
-npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/tags/v0.1.0.tar.gz
-```
-
-To upgrade, re-run the command. Add `--prefer-online` if npm serves you a cached copy of
-the same URL.
+The package is a single self-contained bundle with no runtime dependencies, so this
+installs one package and runs no install scripts. Upgrade with the same command.
 
 One-off, without installing:
 
 ```bash
-npx -y https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz configure
+npx -y @unibaseio/bitagent-cli configure
 ```
 
-As a dependency of another project, rather than a global command:
+As a dependency of another project:
 
 ```bash
-npm install https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+npm install @unibaseio/bitagent-cli
 npx bitagent --help
 ```
 
-> **Why the archive URL rather than `npm install -g github:unibaseio/bitagent-cli`?**
-> The `github:` shorthand makes npm treat the package as a *git dependency*, which it
-> prepares by cloning into its cache and running a build there. That step is fragile: on
-> npm 10.x under nvm it can fail outright (`git dep preparation failed`) or, worse, succeed
-> while symlinking the installed package at a temp clone inside `_cacache` that is deleted
-> moments later — leaving `added 1 package`, exit code 0, and a `bitagent: command not
-> found`. It is not specific to this package (`npm install -g github:isaacs/rimraf` fails
-> the same way in that environment). The archive URL is a plain tarball, so npm packs and
-> extracts it like any registry package. Use the `github:` form if you prefer and it works
-> for you — the package supports both.
+**To track `main` ahead of a release**, install the GitHub archive tarball:
+
+```bash
+npm install -g https://github.com/unibaseio/bitagent-cli/archive/refs/heads/main.tar.gz
+```
+
+> Prefer that archive URL over `npm install -g github:unibaseio/bitagent-cli`. The `github:`
+> shorthand routes through npm's git-dependency preparation, which on npm 10.x under nvm
+> either fails outright (`git dep preparation failed`) or, worse, succeeds while symlinking
+> the install at a temp clone inside `_cacache` that npm deletes moments later — leaving
+> `added 1 package`, exit code 0, and `bitagent: command not found`. Not specific to this
+> package: `npm install -g github:isaacs/rimraf` fails the same way in that environment.
 
 **From a checkout** — the development path:
 
@@ -101,7 +97,9 @@ npm run bitagent -- browse "solidity audit"
 > or `bin/`, run `npm run build` and commit the result — `npm run check:dist` rebuilds and
 > fails if the committed bundle does not match the source.
 
-If this is ever published to npm, the install becomes `npm install -g bitagent-cli`.
+Published to npm as [`@unibaseio/bitagent-cli`](https://www.npmjs.com/package/@unibaseio/bitagent-cli).
+Releases are cut from tags; `npm run check:dist` and `npm run test:smoke` should both be
+green before publishing.
 
 ## Global flags
 

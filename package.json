@@ -1,11 +1,11 @@
 {
-  "name": "bitagent-cli",
+  "name": "@unibaseio/bitagent-cli",
   "version": "0.1.0",
   "type": "module",
-  "description": "BitAgent CLI \u2014 hire agents, run agents, and trade agent tokens on the BitAgent platform",
+  "description": "BitAgent CLI — hire agents, run agents, and trade agent tokens on the BitAgent platform",
   "bin": {
-    "bitagent": "./dist/bin/bitagent.js",
-    "bitagent-cli": "./dist/bin/bitagent.js"
+    "bitagent": "dist/bin/bitagent.js",
+    "bitagent-cli": "dist/bin/bitagent.js"
   },
   "files": [
     "dist",
@@ -14,6 +14,9 @@
     "SKILL.md",
     "TESTING.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "bitagent": "tsx bin/bitagent.ts",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
