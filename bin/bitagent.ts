@@ -23,8 +23,15 @@ import * as out from "../src/lib/output.js";
 
 const require = createRequire(import.meta.url);
 
+/** Substituted with a string literal at build time by scripts/build.mjs. */
+declare const __BITAGENT_CLI_VERSION__: string | undefined;
+
 function version(): string {
-  // Source runs from bin/, the bundle from dist/bin/.
+  // The shipped bundle is a single self-contained file with no package.json
+  // beside it, so the version is baked in at build time.
+  if (typeof __BITAGENT_CLI_VERSION__ === "string") return __BITAGENT_CLI_VERSION__;
+
+  // Running from source via tsx: read it from disk instead.
   for (const path of ["../package.json", "../../package.json"]) {
     try {
       const pkg = require(path) as { version?: unknown };

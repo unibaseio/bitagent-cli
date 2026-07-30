@@ -17,7 +17,7 @@
   "scripts": {
     "bitagent": "tsx bin/bitagent.ts",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "npm run clean && esbuild bin/bitagent.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/bin/bitagent.js --packages=external",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test:smoke": "bash scripts/smoke.sh",
     "check:dist": "npm run build && git diff --exit-code --stat dist",
@@ -44,18 +44,17 @@
     "type": "git",
     "url": "git+https://github.com/unibaseio/bitagent-cli.git"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@bitagent/sdk": "^3.1.4",
+    "@types/node": "^22.10.0",
     "commander": "^13.1.0",
     "dotenv": "^17.2.3",
+    "esbuild": "^0.25.0",
     "picocolors": "^1.1.1",
     "siwe": "^3.0.0",
-    "viem": "^2.45.1"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.0",
-    "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "viem": "^2.45.1"
   }
 }
