@@ -441,8 +441,10 @@ Beyond that, mainnet writes are the same commands with real funds. Two habits:
 Honest about what the automated suite does *not* prove:
 
 - No write path is automated. Everything in tier 2 is manual by design.
-- `terminal chat` / `hire` streaming is exercised only through the non-streaming JSON
-  path; the SSE token loop has no automated coverage.
+- `terminal chat` SSE parsing is covered against [scripts/fake-aip.mjs](scripts/fake-aip.mjs)
+  in five shapes — the platform's real bus events, the envelope `API.md` documents,
+  orchestration progress, an empty stream, and `run_error` — but never against the live
+  platform, and `terminal hire`'s intent handling is not covered at all.
 - `configure`'s interactive prompts (network menu, hidden key entry, pasted token) are not
   driven by any test — only the non-interactive `--token` / `--private-key` /
   `--set-network` flags are reachable from a script.

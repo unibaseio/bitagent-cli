@@ -312,14 +312,50 @@ async function send(
     process.stdout.write(chunk);
   };
 
+  let streamError: string | undefined;
+
   for await (const event of aip.invokeStream(agentId, body, credentials.token)) {
+    // Two naming schemes are in play. The AIP platform emits its internal bus
+    // events — {"type": "answer_chunk", "content": …} and terminal
+    // run_completed / run_error — while API.md documents the SSE envelope as
+    // {"event": "token"|"status"|"result", "data": …}. Accept both: the docs may
+    // yet be honoured, and other deployments already follow them.
     const kind = String(event.event ?? event.type ?? "");
     const data = event.data;
 
-    if (kind === "token") {
-      const piece = typeof data === "string" ? data : String((data as { text?: string })?.text ?? "");
+    if (kind === "token" || kind === "answer_chunk") {
+      const piece =
+        typeof data === "string"
+          ? data
+          : String((data as { text?: string })?.text ?? event.content ?? "");
       text += piece;
       write(piece);
+      continue;
+    }
+
+    if (kind === "result" || kind === "run_completed") {
+      const record = (data ?? event) as {
+        content?: unknown;
+        cost?: unknown;
+        summary?: unknown;
+        output?: unknown;
+      };
+      // A server that did not stream tokens sends the whole answer here. Prefer
+      // the streamed text when we have it — summary is a condensed restatement.
+      const content =
+        (typeof record.content === "string" && record.content) ||
+        contentOf(record.output) ||
+        (typeof record.summary === "string" ? record.summary : "");
+      if (content && !text) {
+        text = content;
+        write(content);
+      }
+      if (record.cost && !out.isJsonMode()) out.hint(`cost: ${String(record.cost)}`);
+      continue;
+    }
+
+    if (kind === "run_error") {
+      streamError = String(event.error ?? (data as { error?: unknown })?.error ?? "unknown error");
       continue;
     }
 
@@ -329,15 +365,10 @@ async function send(
       continue;
     }
 
-    if (kind === "result") {
-      const record = (data ?? {}) as { content?: unknown; cost?: unknown };
-      const content = typeof record.content === "string" ? record.content : "";
-      // Non-streaming servers send the whole answer in the result event.
-      if (content && !text) {
-        text = content;
-        write(content);
-      }
-      if (record.cost && !out.isJsonMode()) out.hint(`cost: ${String(record.cost)}`);
+    // Orchestration progress (task_started, agent_selected, …). _event_to_dict
+    // renders a human-readable line for the ones worth showing.
+    if (typeof event.summary_text === "string" && !out.isJsonMode()) {
+      out.step(event.summary_text);
       continue;
     }
 
@@ -351,7 +382,13 @@ async function send(
   if (wroteHeader) process.stdout.write("\n");
   if (text.trim()) return text;
 
-  // The AIP deployment currently answers /invoke/{id}/stream with an empty 200
+  // A run_error with no partial answer is a real failure, not something to paper
+  // over by re-running the same work on the other endpoint.
+  if (streamError) {
+    throw new CliError(`The Terminal agent failed: ${streamError}`);
+  }
+
+  // Older AIP deployments answer /invoke/{id}/stream with an empty 200
   // text/event-stream: no events, closed in about a second. Streaming is the
   // default, so taking that at face value would leave the user staring at a
   // silent prompt. Retry once on the non-streaming endpoint, which does answer.
@@ -365,6 +402,24 @@ async function send(
     if (response.cost) out.hint(`cost: ${String(response.cost)}`);
   }
   return content;
+}
+
+/**
+ * Pull the human-readable answer out of a run_completed `output`.
+ *
+ * The orchestrator's output is the agent's own payload, so its shape is not
+ * fixed: some agents return a plain string, most return an envelope keyed
+ * `content`, `text` or `response`.
+ */
+function contentOf(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (!output || typeof output !== "object") return "";
+  const record = output as Record<string, unknown>;
+  for (const key of ["content", "text", "response", "result", "answer"]) {
+    const value = record[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
 }
 
 function renderMessage(message: ChatMessage): void {

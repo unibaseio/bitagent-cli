@@ -235,6 +235,73 @@ serve_case "serve reports a failure" \
   'echo boom >&2; exit 3' \
   'exited with code 3'
 
+# ------------------------------------------- terminal chat, against a fake AIP
+printf '\n%s\n' "$(dim '── terminal chat SSE shapes, against a local fake AIP ──')"
+
+# A syntactically valid JWT with a far-future exp. Not a credential: the CLI only
+# reads `exp` locally, and the fake server never checks the signature.
+fake_jwt() {
+  local header payload
+  header=$(printf '{"alg":"HS256","typ":"JWT"}' | base64 | tr -d '=\n' | tr '/+' '_-')
+  payload=$(printf '{"sub":"0xtest","exp":4102444800}' | base64 | tr -d '=\n' | tr '/+' '_-')
+  printf '%s.%s.x' "$header" "$payload"
+}
+
+# chat_case <label> <mode> <expected-substring>
+chat_case() {
+  local label="$1" mode="$2" expect="$3"
+  local port=${AIP_PORT:-8898} log="$WORKDIR/aip-$mode.log" status
+
+  node scripts/fake-aip.mjs "$port" "$mode" 2>"$log" &
+  local pid=$!
+  sleep 1
+  if ! kill -0 "$pid" 2>/dev/null; then
+    skip "$label" "fake aip could not bind port $port"
+    return
+  fi
+
+  UNIBASE_PROXY_AUTH="$(fake_jwt)" $CLI -n "$NETWORK" terminal chat "btc price" \
+    --agent erc8004:butler.test --aip-endpoint "http://localhost:$port" --new --json \
+    >"$WORKDIR/chat.json" 2>"$WORKDIR/chat.err" &
+  wait_bounded $! 30
+  status=$?
+
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+
+  if [ "$status" -eq 124 ]; then
+    fail "$label" "timed out"
+  elif [ "$mode" = "error" ]; then
+    # The error mode must fail loudly, not fall back and pretend it worked.
+    if [ "$status" -ne 0 ] && grep -q "$expect" "$WORKDIR/chat.err"; then
+      pass "$label"
+    else
+      fail "$label" "exit $status, stderr: $(head -c 160 "$WORKDIR/chat.err")"
+    fi
+  elif [ "$status" -ne 0 ]; then
+    fail "$label" "exit $status — $(tr '\n' ' ' <"$WORKDIR/chat.err" | tail -c 160)"
+  # The fake server marks its non-streaming reply, so a streaming case that
+  # silently fell back is a failure rather than a pass. Without this the suite
+  # cannot tell "parsed the stream" from "dropped every event and retried" —
+  # which is exactly how the event-name mismatch hid in production.
+  elif ASSERTION="d.reply.includes('$expect')$([ "$mode" = empty ] || printf " && !d.reply.includes('non-streaming')")" node -e '
+    const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    if (!new Function("d", "return (" + process.env.ASSERTION + ")")(d)) {
+      console.error("reply was: " + JSON.stringify(d.reply)); process.exit(1);
+    }
+  ' "$WORKDIR/chat.json" 2>"$WORKDIR/chat.assert"; then
+    pass "$label"
+  else
+    fail "$label" "$(cat "$WORKDIR/chat.assert")"
+  fi
+}
+
+chat_case "chat reads platform bus events"  bus      "BTC is \$100k"
+chat_case "chat reads documented envelope"  envelope "BTC is \$100k"
+chat_case "chat renders progress + answer"  progress "BTC is \$100k"
+chat_case "empty stream falls back"         empty    "non-streaming"
+chat_case "run_error fails loudly"          error    "no agent could take the task"
+
 # ---------------------------------------------------------------- tier 1
 printf '\n%s\n' "$(dim '── tier 1 — needs a credential, still read-only ──')"
 

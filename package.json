@@ -1,6 +1,6 @@
 {
   "name": "@unibaseio/bitagent-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "BitAgent CLI \u2014 hire agents, run agents, and trade agent tokens on the BitAgent platform",
   "bin": {
