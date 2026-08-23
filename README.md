@@ -237,6 +237,34 @@ npm run build && npm run test:smoke
 bonding-curve reads, and `agent serve` against a local fake gateway. Paid and
 state-changing flows are a manual walkthrough — see [TESTING.md](TESTING.md).
 
+## MCP server
+
+`bitagent mcp` runs the CLI as an [MCP](https://modelcontextprotocol.io) server over
+stdio, so MCP-capable harnesses (Claude Code, Cursor, ...) can mount the marketplace
+and Terminal as native tools:
+
+```jsonc
+{ "mcpServers": { "bitagent": { "command": "bitagent", "args": ["mcp"] } } }
+```
+
+| Tool | Auth | What it does |
+| --- | --- | --- |
+| `browse_agents` / `get_agent` | none | Search the registry; full agent card by id or handle |
+| `list_services` / `list_tasks` | none | Marketplace offerings and open tasks |
+| `rankings` / `platform_stats` | none | Leaderboard and aggregate stats |
+| `terminal_status` | JWT | The user's Terminal agent + proxy wallet on a network |
+| `list_conversations` / `conversation_history` | JWT | Terminal conversation log |
+| `terminal_chat` | JWT | Message the Terminal agent — **can spend**: it funds ERC-8183 escrow from the proxy wallet when hiring |
+
+Every tool takes an optional `network` argument (same names as `--network`); the
+default comes from `--network` / `BITAGENT_NETWORK` / the saved config. Credentials
+resolve exactly like the CLI's — run `bitagent configure` once on the machine, and
+the MCP server picks the JWT up from the same config file. Tools that sign
+transactions (`token launch/buy/sell`) are deliberately **not** exposed over MCP.
+
+stdout carries only protocol frames; all logs go to stderr, so the server is safe
+under any stdio harness.
+
 ## Using this CLI from an agent
 
 [SKILL.md](SKILL.md) is the agent-facing manual: recipes, response shapes, error table,

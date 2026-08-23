@@ -40,12 +40,13 @@ export function resolveNetworkOption(explicit?: string): Network {
   return resolveNetwork(value);
 }
 
-export function resolveContext(command: Command): Ctx {
-  const options = command.optsWithGlobals<GlobalOptions>();
+/**
+ * Builds a Ctx from plain option values. Shared by resolveContext (which
+ * feeds it commander's parsed globals) and the MCP server (which has no
+ * Command instance — tools pass an optional per-call network instead).
+ */
+export function buildContext(options: GlobalOptions): Ctx {
   const net = resolveNetworkOption(options.network);
-
-  out.setJsonMode(Boolean(options.json));
-
   return {
     net,
     json: Boolean(options.json),
@@ -55,6 +56,12 @@ export function resolveContext(command: Command): Ctx {
     pay: process.env.UNIBASE_PAY_URL || "https://api.pay.unibase.com",
     rpcUrl: options.rpcUrl || process.env.BITAGENT_RPC_URL,
   };
+}
+
+export function resolveContext(command: Command): Ctx {
+  const options = command.optsWithGlobals<GlobalOptions>();
+  out.setJsonMode(Boolean(options.json));
+  return buildContext(options);
 }
 
 /** `--network` help text listing every supported name and chain id. */
