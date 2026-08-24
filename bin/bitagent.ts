@@ -14,6 +14,7 @@ import { registerAuthCommands } from "../src/commands/auth.js";
 import { registerConfigureCommand } from "../src/commands/configure.js";
 import { registerJobCommands } from "../src/commands/job.js";
 import { registerMarketCommands } from "../src/commands/market.js";
+import { registerMcpCommand } from "../src/commands/mcp.js";
 import { registerSkillCommands } from "../src/commands/skill.js";
 import { registerTerminalCommands } from "../src/commands/terminal.js";
 import { registerTokenCommands } from "../src/commands/token.js";
@@ -81,6 +82,9 @@ Settle work directly (ERC-8183):
 Launchpad (BSC only):
   bitagent token launch --name "My Agent" --symbol MYAG --reserve UB
   bitagent token buy <token> --amount 0.1
+
+MCP (AI harness integration):
+  bitagent mcp                       serve marketplace + Terminal tools over stdio
 `,
   );
 
@@ -92,6 +96,7 @@ registerJobCommands(program);
 registerTerminalCommands(program);
 registerTokenCommands(program);
 registerSkillCommands(program);
+registerMcpCommand(program);
 
 function report(error: unknown): never {
   if (isCliError(error)) {
