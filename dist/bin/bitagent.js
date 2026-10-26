@@ -3888,11 +3888,28 @@ var init_aip = __esm({
       getTask(taskId) {
         return this.get(`/tasks/${encodeURIComponent(taskId)}`);
       }
-      /** Rankings are platform-wide: the endpoint ignores `chain_id`. */
-      rankings(query = {}) {
-        return request(this.base, "/rankings", {
-          query: { metric: "revenue", limit: 10, ...query }
+      /**
+       * Leaderboard for this network, ranked server-side. `metric` is revenue,
+       * success_rate or calls; "tasks" (the pre-0.2.1 name) means calls.
+       */
+      async rankings(query = {}) {
+        const metric = query.metric === "tasks" ? "calls" : query.metric ?? "revenue";
+        const limit = query.limit ?? 10;
+        const page = await this.get("/agents/ranking", {
+          sort_by: metric,
+          page: 1,
+          pageSize: limit,
+          registered_onchain: true
         });
+        return (page.data ?? []).slice(0, limit).map((agent, i) => ({
+          rank: i + 1,
+          agent_id: agent.agent_id,
+          handle: agent.handle,
+          name: agent.display_name,
+          score: metric === "success_rate" ? agent.stats?.success_rate : metric === "calls" ? agent.stats?.total_jobs : agent.stats?.total_revenue,
+          metric,
+          stats: agent.stats
+        }));
       }
       stats() {
         return this.get("/stats/summary");
@@ -60086,7 +60103,7 @@ var init_chains2 = __esm({
             address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
             decimals: 18,
             initialPrice: 8e-10,
-            stepCount: 99
+            stepCount: 100
           }
         }
       },
@@ -60128,7 +60145,7 @@ var init_chains2 = __esm({
             address: "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
             decimals: 18,
             initialPrice: 8e-10,
-            stepCount: 99
+            stepCount: 100
           }
         }
       },
@@ -60150,7 +60167,34 @@ var init_chains2 = __esm({
           usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
           ub: "0x51d9eef6d49e2782f99d43f659d4f0cb493c28cc"
         },
-        reserves: {}
+        reserves: {
+          UB: {
+            symbol: "UB",
+            address: "0x51d9eEF6d49E2782f99D43F659d4f0cB493C28CC",
+            decimals: 18,
+            initialPrice: 8e-6,
+            stepCount: 100
+          },
+          // 6 decimals can't price below 1e-6, so the curve is a flat 1e-6 tier
+          // (graduation ≈ 8,500 USDC at 8.5B curve supply), as on the web app.
+          USDC: {
+            symbol: "USDC",
+            address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            decimals: 6,
+            initialPrice: 1e-6,
+            stepCount: 100,
+            curveType: "LINEAR",
+            finalPrice: 1e-6
+          },
+          // Tuned for mainnet ETH value: 8e-11 → 8e-10 graduates at ~2.7 WETH.
+          WETH: {
+            symbol: "WETH",
+            address: "0x4200000000000000000000000000000000000006",
+            decimals: 18,
+            initialPrice: 8e-11,
+            stepCount: 100
+          }
+        }
       },
       baseSepolia: {
         name: "baseSepolia",
@@ -60170,7 +60214,33 @@ var init_chains2 = __esm({
           usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
           ub: "0x27C8b63E5aCD5298035B984AC3ea3f39d522A700"
         },
-        reserves: {}
+        reserves: {
+          UB: {
+            symbol: "UB",
+            address: "0x27C8b63E5aCD5298035B984AC3ea3f39d522A700",
+            decimals: 18,
+            initialPrice: 8e-6,
+            stepCount: 100
+          },
+          // 6 decimals can't price below 1e-6, so the curve is a flat 1e-6 tier
+          // (graduation ≈ 8,500 USDC at 8.5B curve supply), as on the web app.
+          USDC: {
+            symbol: "USDC",
+            address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            decimals: 6,
+            initialPrice: 1e-6,
+            stepCount: 100,
+            curveType: "LINEAR",
+            finalPrice: 1e-6
+          },
+          WETH: {
+            symbol: "WETH",
+            address: "0x4200000000000000000000000000000000000006",
+            decimals: 18,
+            initialPrice: 8e-10,
+            stepCount: 100
+          }
+        }
       },
       xLayerTestnet: {
         name: "xLayerTestnet",
@@ -60190,7 +60260,16 @@ var init_chains2 = __esm({
           evaluator: "0xFc140Ff8108448c56c0f9FACd0c3434E83aE1568",
           usdc: "0xcb8bf24c6ce16ad21d707c9505421a17f2bec79d"
         },
-        reserves: {}
+        // UB is the only reserve here; USDC is the commerce currency, not a reserve.
+        reserves: {
+          UB: {
+            symbol: "UB",
+            address: "0x9311791A535612dC3f907Ee0b600275F292620a0",
+            decimals: 18,
+            initialPrice: 8e-6,
+            stepCount: 100
+          }
+        }
       }
     };
     BY_CHAIN_ID = new Map(
@@ -132322,9 +132401,9 @@ async function startMcpServer(defaults2) {
     "rankings",
     {
       title: "Agent rankings",
-      description: "Leaderboard of top-performing agents by revenue or tasks. Read-only.",
+      description: "Leaderboard of top-performing agents on a network, by revenue, success rate or calls. Read-only.",
       inputSchema: {
-        metric: external_exports.enum(["revenue", "tasks"]).default("revenue"),
+        metric: external_exports.enum(["revenue", "success_rate", "calls"]).default("revenue"),
         limit: external_exports.number().int().min(1).max(100).default(10),
         ...networkParam
       }
@@ -132447,7 +132526,7 @@ var init_mcp2 = __esm({
     init_context();
     init_credentials();
     init_chains2();
-    serverVersion = () => true ? "0.2.0" : "0.0.0";
+    serverVersion = () => true ? "0.2.1" : "0.0.0";
     networkNames2 = Object.values(NETWORKS).map((n) => n.name).join(" | ");
     ok = (data) => ({
       content: [{ type: "text", text: JSON.stringify(data, null, 2) }]
@@ -169114,6 +169193,7 @@ function renderJob(record2, verbose = false) {
 // src/commands/market.ts
 init_aip();
 init_context();
+init_errors();
 init_output();
 var agentName = (agent) => agent.display_name || agent.card?.name || agent.handle || agent.agent_id;
 var agentPrice = (agent) => {
@@ -169262,15 +169342,21 @@ function registerMarketCommands(program3) {
       ]);
     });
   });
-  program3.command("rankings").description("Leaderboard of the top-performing agents").option("--metric <metric>", "revenue | tasks", "revenue").option("--limit <n>", "Number of agents", "10").action(async function() {
+  program3.command("rankings").description("Leaderboard of the top-performing agents").option("--metric <metric>", "revenue | success_rate | calls", "revenue").option("--limit <n>", "Number of agents", "10").action(async function() {
     const ctx = resolveContext(this);
     const options = this.opts();
+    if (!["revenue", "success_rate", "calls", "tasks"].includes(options.metric)) {
+      throw new CliError(
+        `Unknown metric "${options.metric}".`,
+        "Use --metric revenue, success_rate or calls."
+      );
+    }
     const rankings = await AipClient.from(ctx).rankings({
       metric: options.metric,
       limit: Number(options.limit)
     });
     result(rankings, () => {
-      heading(`Top agents by ${options.metric} (all networks)`);
+      heading(`Top agents by ${options.metric} on ${ctx.net.label}`);
       table(rankings, [
         { header: "#", value: (r) => String(r.rank ?? ""), align: "right" },
         { header: "handle", value: (r) => r.handle ?? "\u2014", max: 26 },
@@ -169283,7 +169369,7 @@ function registerMarketCommands(program3) {
         { header: "agent id", value: (r) => r.agent_id ?? "\u2014", max: 46 }
       ]);
       if (rankings.length === 0) {
-        hint(`No agents ranked by ${options.metric} yet \u2014 try --metric tasks.`);
+        hint(`No agents ranked on ${ctx.net.label} yet \u2014 try another --network.`);
       }
     });
   });
@@ -173718,7 +173804,7 @@ var files = [
 ];
 var type2 = "module";
 var license = "BSD-3-Clause";
-var version6 = "3.1.4";
+var version6 = "3.1.8";
 var main = "./dist/index.cjs";
 var module = "./dist/index.mjs";
 var types2 = "./dist/index.d.ts";
@@ -174227,6 +174313,19 @@ var BOND_ABI = [
     anonymous: false,
     inputs: [
       {
+        indexed: true,
+        internalType: "address",
+        name: "adapter",
+        type: "address"
+      }
+    ],
+    name: "DexAdapterUpdated",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
         indexed: false,
         internalType: "uint64",
         name: "version",
@@ -174490,6 +174589,49 @@ var BOND_ABI = [
       }
     ],
     name: "TokenGraduated",
+    type: "event"
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "token",
+        type: "address"
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "reserveToken",
+        type: "address"
+      },
+      {
+        indexed: true,
+        internalType: "bytes32",
+        name: "poolId",
+        type: "bytes32"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "lpTokenId",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "tokenAmount",
+        type: "uint256"
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "reserveTokenAmount",
+        type: "uint256"
+      }
+    ],
+    name: "TokenGraduatedV4",
     type: "event"
   },
   {
@@ -174816,6 +174958,19 @@ var BOND_ABI = [
       {
         internalType: "address",
         name: "lockerRecipient",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "dexAdapter",
+    outputs: [
+      {
+        internalType: "contract IDexAdapter",
+        name: "",
         type: "address"
       }
     ],
@@ -175232,26 +175387,35 @@ var BOND_ABI = [
     inputs: [
       {
         internalType: "address",
-        name: "reserveToken",
+        name: "",
         type: "address"
-      },
+      }
+    ],
+    name: "graduatedTokenLpIds",
+    outputs: [
       {
         internalType: "uint256",
-        name: "start",
-        type: "uint256"
-      },
-      {
-        internalType: "uint256",
-        name: "stop",
+        name: "",
         type: "uint256"
       }
     ],
-    name: "getTokensByReserveToken",
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    name: "graduatedTokenPoolIds",
     outputs: [
       {
-        internalType: "address[]",
-        name: "addresses",
-        type: "address[]"
+        internalType: "bytes32",
+        name: "",
+        type: "bytes32"
       }
     ],
     stateMutability: "view",
@@ -175357,7 +175521,7 @@ var BOND_ABI = [
       },
       {
         internalType: "address",
-        name: "vaultManager_",
+        name: "lockerManager_",
         type: "address"
       },
       {
@@ -175369,6 +175533,19 @@ var BOND_ABI = [
     name: "initialize",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "lockerManager",
+    outputs: [
+      {
+        internalType: "contract ILockerManager",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
     type: "function"
   },
   {
@@ -175451,6 +175628,25 @@ var BOND_ABI = [
     type: "function"
   },
   {
+    inputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address"
+      }
+    ],
+    name: "poolVersionOf",
+    outputs: [
+      {
+        internalType: "uint8",
+        name: "",
+        type: "uint8"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
     inputs: [],
     name: "positionManager",
     outputs: [
@@ -175527,6 +175723,19 @@ var BOND_ABI = [
       }
     ],
     name: "revokeRole",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "adapter",
+        type: "address"
+      }
+    ],
+    name: "setDexAdapter",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function"
@@ -175844,6 +176053,19 @@ var BOND_ABI = [
   {
     inputs: [
       {
+        internalType: "address",
+        name: "newManager",
+        type: "address"
+      }
+    ],
+    name: "updateILockerManager",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
         internalType: "uint256",
         name: "ratio",
         type: "uint256"
@@ -175897,11 +176119,11 @@ var BOND_ABI = [
     inputs: [
       {
         internalType: "address",
-        name: "newManager",
+        name: "newTokenImplementation",
         type: "address"
       }
     ],
-    name: "updateVaultManager",
+    name: "updateTokenImplementation",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function"
@@ -175956,19 +176178,6 @@ var BOND_ABI = [
   },
   {
     inputs: [],
-    name: "vaultManager",
-    outputs: [
-      {
-        internalType: "contract VaultManager",
-        name: "",
-        type: "address"
-      }
-    ],
-    stateMutability: "view",
-    type: "function"
-  },
-  {
-    inputs: [],
     name: "version",
     outputs: [
       {
@@ -175978,6 +176187,61 @@ var BOND_ABI = [
       }
     ],
     stateMutability: "pure",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "reserveToken",
+        type: "address"
+      },
+      {
+        internalType: "uint256",
+        name: "start",
+        type: "uint256"
+      },
+      {
+        internalType: "uint256",
+        name: "stop",
+        type: "uint256"
+      }
+    ],
+    name: "getTokensByReserveToken",
+    outputs: [
+      {
+        internalType: "address[]",
+        name: "addresses",
+        type: "address[]"
+      }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "newManager",
+        type: "address"
+      }
+    ],
+    name: "updateVaultManager",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "vaultManager",
+    outputs: [
+      {
+        internalType: "contract VaultManager",
+        name: "",
+        type: "address"
+      }
+    ],
+    stateMutability: "view",
     type: "function"
   },
   {
@@ -177389,6 +177653,8 @@ var ZAP_ABI = [
   },
   { stateMutability: "payable", type: "receive" }
 ];
+var xLayerTestnet3 = { id: 1952 };
+var robinhoodTestnet2 = { id: 46630 };
 var SDK_CONTRACT_ADDRESSES = {
   ERC20: {
     [mainnet.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB",
@@ -177409,7 +177675,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB",
     [kaia.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB",
     [cyber.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB",
-    [ham.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB"
+    [ham.id]: "0xDEF22E6C358f10690D433CC82a0Ca9d98D3a8ebB",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x187E536C5404dD472476B9e4C716878d359a506A",
@@ -177430,7 +177698,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x187E536C5404dD472476B9e4C716878d359a506A",
     [kaia.id]: "0x187E536C5404dD472476B9e4C716878d359a506A",
     [cyber.id]: "0x187E536C5404dD472476B9e4C716878d359a506A",
-    [ham.id]: "0x187E536C5404dD472476B9e4C716878d359a506A"
+    [ham.id]: "0x187E536C5404dD472476B9e4C716878d359a506A",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B",
@@ -177451,7 +177721,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B",
     [kaia.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B",
     [cyber.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B",
-    [ham.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B"
+    [ham.id]: "0x912e3153a021b092ab85EA79B2a5d07b04B0073B",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177472,7 +177744,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537",
@@ -177493,7 +177767,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537",
     [kaia.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537",
     [cyber.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537",
-    [ham.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537"
+    [ham.id]: "0xe4287a55a5512aE2cAb53bb1eFA4991ac7E2c537",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867",
@@ -177514,7 +177790,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867",
     [kaia.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867",
     [cyber.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867",
-    [ham.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867"
+    [ham.id]: "0xBF2eb2b419d1871446509B7Ac233bd32Be7B8867",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225",
@@ -177535,7 +177813,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225",
     [kaia.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225",
     [cyber.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225",
-    [ham.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225"
+    [ham.id]: "0xDF407862072B4de05aae94c1A2f0bE5EF8C72225",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -177556,7 +177836,9 @@ var SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v124_SDK_CONTRACT_ADDRESSES = {
@@ -177579,7 +177861,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177600,7 +177884,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177621,7 +177907,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177642,7 +177930,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177663,7 +177953,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177684,7 +177976,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177705,7 +177999,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -177726,7 +178022,9 @@ var v124_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v125_SDK_CONTRACT_ADDRESSES = {
@@ -177749,7 +178047,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177770,7 +178070,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177791,7 +178093,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177812,7 +178116,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177833,7 +178139,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177854,7 +178162,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177875,7 +178185,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -177896,7 +178208,9 @@ var v125_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v200_SDK_CONTRACT_ADDRESSES = {
@@ -177919,7 +178233,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177940,7 +178256,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177961,7 +178279,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -177982,7 +178302,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178003,7 +178325,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178024,7 +178348,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178045,7 +178371,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178066,7 +178394,9 @@ var v200_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v201_SDK_CONTRACT_ADDRESSES = {
@@ -178089,7 +178419,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178110,7 +178442,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178131,7 +178465,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178152,7 +178488,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178173,7 +178511,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178194,7 +178534,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178215,7 +178557,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178236,7 +178580,9 @@ var v201_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v202_SDK_CONTRACT_ADDRESSES = {
@@ -178259,7 +178605,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178280,7 +178628,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178301,7 +178651,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178322,7 +178674,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178343,7 +178697,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178364,7 +178720,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178385,7 +178743,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178406,7 +178766,9 @@ var v202_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v203_SDK_CONTRACT_ADDRESSES = {
@@ -178429,7 +178791,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178450,7 +178814,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178471,7 +178837,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178492,7 +178860,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178513,7 +178883,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178534,7 +178906,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178555,7 +178929,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178576,7 +178952,9 @@ var v203_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v210_SDK_CONTRACT_ADDRESSES = {
@@ -178599,7 +178977,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178620,7 +179000,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178641,7 +179023,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178662,7 +179046,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178683,7 +179069,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178704,7 +179092,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178725,7 +179115,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178746,7 +179138,9 @@ var v210_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v211_SDK_CONTRACT_ADDRESSES = {
@@ -178769,7 +179163,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178790,7 +179186,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178811,7 +179209,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178832,7 +179232,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178853,7 +179255,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178874,7 +179278,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178895,7 +179301,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -178916,7 +179324,9 @@ var v211_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v212_SDK_CONTRACT_ADDRESSES = {
@@ -178939,7 +179349,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178960,7 +179372,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -178981,7 +179395,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179002,7 +179418,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179023,7 +179441,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179044,7 +179464,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179065,7 +179487,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -179086,7 +179510,9 @@ var v212_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v300_SDK_CONTRACT_ADDRESSES = {
@@ -179109,7 +179535,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179130,7 +179558,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179151,7 +179581,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179172,7 +179604,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179193,7 +179627,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179214,7 +179650,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179235,7 +179673,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -179256,7 +179696,9 @@ var v300_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v301_SDK_CONTRACT_ADDRESSES = {
@@ -179279,7 +179721,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179300,7 +179744,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179321,7 +179767,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179342,7 +179790,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179363,7 +179813,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179384,7 +179836,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179405,7 +179859,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -179426,7 +179882,9 @@ var v301_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v302_SDK_CONTRACT_ADDRESSES = {
@@ -179449,7 +179907,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179470,7 +179930,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179491,7 +179953,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179512,7 +179976,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179533,7 +179999,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179554,7 +180022,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179575,7 +180045,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -179596,7 +180068,9 @@ var v302_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var v310_SDK_CONTRACT_ADDRESSES = {
@@ -179610,7 +180084,7 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [bsc.id]: "0xB3203E35c9c481c86423de81cEC8D70cFfb84537",
     [bscTestnet.id]: "0xcBa44BB96BE7937B620c4638F9Da6B49055E4D65",
     [base.id]: "0x0000000000000000000000000000000000000000",
-    [baseSepolia.id]: "0x0000000000000000000000000000000000000000",
+    [baseSepolia.id]: "0xfF56EeB62AD4eA2183545EBe4da2cC64de91BC51",
     [sepolia.id]: "0x0000000000000000000000000000000000000000",
     [blast.id]: "0x0000000000000000000000000000000000000000",
     [blastSepolia.id]: "0x0000000000000000000000000000000000000000",
@@ -179619,7 +180093,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x27C8b63E5aCD5298035B984AC3ea3f39d522A700",
+    [robinhoodTestnet2.id]: "0x9311791A535612dC3f907Ee0b600275F292620a0"
   },
   ERC1155: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179640,7 +180116,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   BOND: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179651,8 +180129,10 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [polygon.id]: "0x0000000000000000000000000000000000000000",
     [bsc.id]: "0x0810F8d5dAbEfF3200e4d9EaA96100ea2A58aF6A",
     [bscTestnet.id]: "0x62350b785796D6c11274903A76c662145BB1D74D",
-    [base.id]: "0x0000000000000000000000000000000000000000",
-    [baseSepolia.id]: "0x0000000000000000000000000000000000000000",
+    [base.id]: "0xD0320dba7896f51586c797b17F330a93e7B29C68",
+    // B20 bond (Base-native B20 token standard)
+    [baseSepolia.id]: "0xA4C2010A82026F8617FE507E5fA69E770235a428",
+    // B20 bond (Base-native B20 token standard)
     [sepolia.id]: "0x0000000000000000000000000000000000000000",
     [blast.id]: "0x0000000000000000000000000000000000000000",
     [blastSepolia.id]: "0x0000000000000000000000000000000000000000",
@@ -179661,7 +180141,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x2C22b6B43dbBE38A56f1aDB633353D87892789D0",
+    [robinhoodTestnet2.id]: "0xD1A8f0771265b82A0968FFA31Fa65d604Ff63ae2"
   },
   REFERRAL: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179673,7 +180155,7 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [bsc.id]: "0xC0C8dA9a4BCB828bd0F2B3d2953CF3674A9b8edF",
     [bscTestnet.id]: "0x61930A10bd372e0D7C8821DBb65BFBF8203073B6",
     [base.id]: "0x0000000000000000000000000000000000000000",
-    [baseSepolia.id]: "0x0000000000000000000000000000000000000000",
+    [baseSepolia.id]: "0xF2731674a9B85A6e64e044f3533082a96a320878",
     [sepolia.id]: "0x0000000000000000000000000000000000000000",
     [blast.id]: "0x0000000000000000000000000000000000000000",
     [blastSepolia.id]: "0x0000000000000000000000000000000000000000",
@@ -179682,7 +180164,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0xA605E1C643C6d5280646AcDF2E037D51f56E2d33",
+    [robinhoodTestnet2.id]: "0xC006FD116f137d8396d845D029F2C5D1C4368bB8"
   },
   ZAP: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179703,7 +180187,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   LOCKER: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179715,7 +180201,7 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [bsc.id]: "0x0000000000000000000000000000000000000000",
     [bscTestnet.id]: "0x0000000000000000000000000000000000000000",
     [base.id]: "0x0000000000000000000000000000000000000000",
-    [baseSepolia.id]: "0x0000000000000000000000000000000000000000",
+    [baseSepolia.id]: "0x2C22b6B43dbBE38A56f1aDB633353D87892789D0",
     [sepolia.id]: "0x0000000000000000000000000000000000000000",
     [blast.id]: "0x0000000000000000000000000000000000000000",
     [blastSepolia.id]: "0x0000000000000000000000000000000000000000",
@@ -179724,7 +180210,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x25c8d4cB46E15f39d10210E326Ea9c79b2137A76",
+    [robinhoodTestnet2.id]: "0xE91179f7f5d9B7CF312Bc1FE3f6b320cF826919C"
   },
   MERKLE: {
     [mainnet.id]: "0x0000000000000000000000000000000000000000",
@@ -179745,7 +180233,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [cyberTestnet.id]: "0x0000000000000000000000000000000000000000",
     [kaia.id]: "0x0000000000000000000000000000000000000000",
     [cyber.id]: "0x0000000000000000000000000000000000000000",
-    [ham.id]: "0x0000000000000000000000000000000000000000"
+    [ham.id]: "0x0000000000000000000000000000000000000000",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   },
   ONEINCH: {
     [mainnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
@@ -179766,7 +180256,9 @@ var v310_SDK_CONTRACT_ADDRESSES = {
     [degen.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyberTestnet.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
     [cyber.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
-    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8"
+    [ham.id]: "0x0AdDd25a91563696D8567Df78D5A01C9a991F9B8",
+    [xLayerTestnet3.id]: "0x0000000000000000000000000000000000000000",
+    [robinhoodTestnet2.id]: "0x0000000000000000000000000000000000000000"
   }
 };
 var VERSION_TO_SDK_CONTRACT_ADDRESSES = {
@@ -179981,8 +180473,18 @@ function chainStringToId(name3) {
   if (!found) throw new ChainNotSupportedError(name3);
   return found.id;
 }
+var robinhoodTestnetChain = {
+  id: 46630,
+  name: "Robinhood Chain Testnet",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.testnet.chain.robinhood.com"] } },
+  blockExplorers: {
+    default: { name: "Robinhood Explorer", url: "https://explorer.testnet.chain.robinhood.com" }
+  },
+  testnet: true
+};
 function getChain(chainId) {
-  let chain = Object.values(chains_exports).find((c) => c.id === chainId) ?? CHAINS.find((c) => c.id === chainId)?.chain;
+  let chain = Object.values(chains_exports).find((c) => c.id === chainId) ?? CHAINS.find((c) => c.id === chainId)?.chain ?? (chainId === robinhoodTestnetChain.id ? robinhoodTestnetChain : void 0);
   if (!chain) {
     throw new ChainNotSupportedError(chainId);
   }
@@ -182056,6 +182558,24 @@ var WRAPPED_NATIVE_TOKENS = {
     nativeSymbol: "ETH",
     oneInchSymbol: "USDC",
     decimals: 18
+  },
+  // X Layer testnet (1952) — canonical wrapped OKB at 0x4200…0006, same address
+  // family as Base / Optimism predeploys.
+  1952: {
+    image: "https://bitagent.io/assets/tokens/okb.png",
+    tokenAddress: "0x4200000000000000000000000000000000000006",
+    nativeSymbol: "OKB",
+    oneInchSymbol: "USDT",
+    decimals: 18
+  },
+  // Robinhood Chain testnet (46630) — Arbitrum Orbit, no OP predeploy; WETH9
+  // verified on-chain (deposit/withdraw selectors present).
+  46630: {
+    image: "https://bitagent.io/assets/tokens/eth.png",
+    tokenAddress: "0x33e4191705c386532ba27cBF171Db86919200B94",
+    nativeSymbol: "ETH",
+    oneInchSymbol: "USDT",
+    decimals: 18
   }
 };
 var TOKENS = {
@@ -182078,7 +182598,11 @@ var TOKENS = {
   [cyber.id]: CYBER_TOKENS,
   [cyberTestnet.id]: CYBER_TESTNET_TOKENS,
   [kaia.id]: KAIA_TOKENS,
-  [ham.id]: HAM_TOKENS
+  [ham.id]: HAM_TOKENS,
+  // X Layer testnet — no curated whitelist yet; empty so consumers don't crash.
+  1952: {},
+  // Robinhood Chain testnet — no curated whitelist yet.
+  46630: {}
 };
 var MCV2_WALLET_STATE_LOCALSTORAGE = "mcv2_wallet_state";
 var Client = class _Client {
@@ -182395,7 +182919,8 @@ function computeCreate2Address(chainId, tokenType, tokenSymbol, creator, version
     version8
   );
   const hexedSymbol = stringToHex(tokenSymbol);
-  const packed = `0x${[creator, hexedSymbol, bondAddress].map((x) => x?.replace("0x", "")).join("").toLowerCase()}`;
+  const hexedChainId = numberToHex(BigInt(chainId), { size: 32 });
+  const packed = `0x${[creator, hexedSymbol, bondAddress, hexedChainId].map((x) => x?.replace("0x", "")).join("").toLowerCase()}`;
   const salt = keccak256(packed);
   const creationCode = [
     "0x3d602d80600a3d3981f3363d3d373d3d3d363d73",
@@ -182407,6 +182932,43 @@ function computeCreate2Address(chainId, tokenType, tokenSymbol, creator, version
   const hash6 = keccak256(hexed);
   const address = getAddress(`0x${hash6.slice(-40)}`);
   return address;
+}
+var B20_FACTORY_ADDRESS = "0xB20f000000000000000000000000000000000000";
+var B20_ASSET_VARIANT = 0;
+var B20_BONDS = new Set(
+  [
+    "0xA4C2010A82026F8617FE507E5fA69E770235a428",
+    // Base Sepolia
+    "0xD0320dba7896f51586c797b17F330a93e7B29C68"
+    // Base mainnet
+  ].map((a) => a.toLowerCase())
+);
+function isB20Bond(chainId, version8) {
+  try {
+    const bond = getBitAgentContractAddress("BOND", chainId, version8);
+    return B20_BONDS.has(bond.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+var B20_FACTORY_ABI = [
+  {
+    type: "function",
+    name: "getB20Address",
+    stateMutability: "view",
+    inputs: [
+      { name: "variant", type: "uint8" },
+      { name: "sender", type: "address" },
+      { name: "salt", type: "bytes32" }
+    ],
+    outputs: [{ name: "", type: "address" }]
+  }
+];
+function computeB20Salt(chainId, tokenSymbol, creator) {
+  const hexedSymbol = stringToHex(tokenSymbol);
+  const hexedChainId = numberToHex(BigInt(chainId), { size: 32 });
+  const packed = `0x${[creator, hexedSymbol, hexedChainId].map((x) => x?.replace("0x", "")).join("").toLowerCase()}`;
+  return keccak256(packed);
 }
 var { uniqBy } = import_lodash.default;
 function formatGraphPoint(value, maxDecimalPoints) {
@@ -182916,7 +183478,11 @@ var STABLE_COINS = {
   [cyber.id]: { address: "0x", symbol: "", decimals: 0n },
   [cyberTestnet.id]: { address: "0x", symbol: "", decimals: 0n },
   [kaia.id]: { address: "0x", symbol: "", decimals: 0n },
-  [ham.id]: { address: "0x", symbol: "", decimals: 0n }
+  [ham.id]: { address: "0x", symbol: "", decimals: 0n },
+  1952: { address: "0x", symbol: "", decimals: 0n },
+  // X Layer testnet — no stable wired
+  46630: { address: "0x", symbol: "", decimals: 0n }
+  // Robinhood testnet — no stable wired
 };
 var OneInch = class {
   chainId;
@@ -182945,6 +183511,10 @@ function isFalse(value) {
 }
 var Token = class {
   tokenAddress;
+  creator;
+  // True when constructed by symbol on a B20 version: the token address is a B20
+  // precompile address resolved lazily on-chain (see ensureAddressResolved).
+  b20Pending = false;
   clientHelper;
   airdropHelper;
   oneinch;
@@ -182956,11 +183526,17 @@ var Token = class {
   chainId;
   constructor(params) {
     const { symbolOrAddress, chainId, tokenType, version: version8, creator } = params;
+    this.creator = creator;
     if (isAddress(symbolOrAddress)) {
       this.tokenAddress = symbolOrAddress;
     } else {
-      this.tokenAddress = computeCreate2Address(chainId, tokenType, symbolOrAddress, creator, version8);
       this.symbol = symbolOrAddress;
+      if (isB20Bond(chainId, version8)) {
+        this.tokenAddress = "0x0000000000000000000000000000000000000000";
+        this.b20Pending = true;
+      } else {
+        this.tokenAddress = computeCreate2Address(chainId, tokenType, symbolOrAddress, creator, version8);
+      }
     }
     this.chain = getChain(chainId);
     this.chainId = chainId;
@@ -182980,6 +183556,7 @@ var Token = class {
     return tradeType === "buy" ? await this.getReserveTokenAddress() : this.getTokenAddress();
   }
   async bondContractApproved(params) {
+    await this.ensureAddressResolved();
     const { tradeType, walletAddress, isZap } = params;
     const tokenToApprove = await this.tokenToApprove(tradeType);
     if (this.tokenType === "ERC1155" && tradeType === "sell") {
@@ -183083,7 +183660,8 @@ var Token = class {
     const reserveIsWrapped = WRAPPED_NATIVE_TOKENS[this.chainId].tokenAddress === reserveToken;
     return reserveIsWrapped;
   }
-  exists() {
+  async exists() {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "exists",
       args: [this.tokenAddress]
@@ -183110,7 +183688,31 @@ var Token = class {
   getTokenAddress() {
     return this.tokenAddress;
   }
+  // Resolves the on-chain B20 token address for helpers constructed by symbol on
+  // a B20 version. No-op (no RPC) for address-constructed helpers and non-B20
+  // versions, so existing chains are completely unaffected.
+  async ensureAddressResolved() {
+    if (!this.b20Pending) return;
+    if (!this.symbol) throw new SymbolNotDefinedError();
+    const salt = computeB20Salt(this.chainId, this.symbol, this.creator);
+    const bondAddress = getBitAgentContractAddress("BOND", this.chainId, this.version);
+    const resolved = await this.clientHelper._getPublicClient(this.chainId).readContract({
+      address: B20_FACTORY_ADDRESS,
+      abi: B20_FACTORY_ABI,
+      functionName: "getB20Address",
+      args: [B20_ASSET_VARIANT, bondAddress, salt]
+    });
+    this.tokenAddress = resolved;
+    this.b20Pending = false;
+  }
+  // Public accessor that guarantees the (B20) token address is resolved on-chain.
+  // On non-B20 chains this returns the address synchronously-derived at construction.
+  async resolveTokenAddress() {
+    await this.ensureAddressResolved();
+    return this.tokenAddress;
+  }
   async getUsdRate(amount = 1) {
+    await this.ensureAddressResolved();
     const rateData = await this.oneinch.getUsdRate({
       tokenAddress: this.tokenAddress,
       tokenDecimals: this.tokenType === "ERC20" ? 18 : 0
@@ -183119,13 +183721,15 @@ var Token = class {
     const { rate, stableCoin } = rateData;
     return { usdRate: rate * amount, stableCoin };
   }
-  getDetail() {
+  async getDetail() {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "getDetail",
       args: [this.tokenAddress]
     });
   }
   async getTokenBond() {
+    await this.ensureAddressResolved();
     const [creator, mintRoyalty, burnRoyalty, createdAt, reserveToken, reserveBalance] = await bondContract.network(this.chainId, this.version).read({
       functionName: "tokenBond",
       args: [this.tokenAddress]
@@ -183139,31 +183743,36 @@ var Token = class {
       reserveBalance
     };
   }
-  getSteps() {
+  async getSteps() {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "getSteps",
       args: [this.tokenAddress]
     });
   }
-  getMaxSupply() {
+  async getMaxSupply() {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "maxSupply",
       args: [this.tokenAddress]
     });
   }
-  getPriceForNextMint() {
+  async getPriceForNextMint() {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "priceForNextMint",
       args: [this.tokenAddress]
     });
   }
-  getSellEstimation(amount) {
+  async getSellEstimation(amount) {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "getRefundForTokens",
       args: [this.tokenAddress, amount]
     });
   }
-  getBuyEstimation(amount) {
+  async getBuyEstimation(amount) {
+    await this.ensureAddressResolved();
     return bondContract.network(this.chainId, this.version).read({
       functionName: "getReserveForToken",
       args: [this.tokenAddress, amount]
@@ -183283,6 +183892,7 @@ var Token = class {
   async transfer(params) {
     const { amount, recipient, onError } = params;
     try {
+      await this.ensureAddressResolved();
       if (this.tokenType === "ERC20") {
         return erc20Contract.network(this.chainId, this.version).write({
           ...params,
@@ -183478,7 +184088,8 @@ var ERC20 = class extends Token {
       tokenType: "ERC20"
     });
   }
-  getAllowance(params) {
+  async getAllowance(params) {
+    await this.ensureAddressResolved();
     const { owner, spender } = params;
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
@@ -183486,44 +184097,51 @@ var ERC20 = class extends Token {
       args: [owner, spender]
     });
   }
-  getBalanceOf(walletAddress) {
+  async getBalanceOf(walletAddress) {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "balanceOf",
       args: [walletAddress]
     });
   }
-  getBondAddress() {
+  async getBondAddress() {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "bond"
     });
   }
-  getDecimals() {
+  async getDecimals() {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "decimals"
     });
   }
-  getName() {
+  async getName() {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "name"
     });
   }
-  getSymbol() {
+  async getSymbol() {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "symbol"
     });
   }
-  getTotalSupply() {
+  async getTotalSupply() {
+    await this.ensureAddressResolved();
     return erc20Contract.network(this.chainId, this.version).read({
       tokenAddress: this.getTokenAddress(),
       functionName: "totalSupply"
     });
   }
   async approve(params) {
+    await this.ensureAddressResolved();
     const { spender, amount } = params;
     return erc20Contract.network(this.chainId, this.version).write({
       ...params,
@@ -183764,7 +184382,7 @@ function requireLaunchpad(net) {
   if (Object.keys(net.reserves).length === 0) {
     throw new CliError(
       `The bonding-curve launchpad is not available on ${net.label}.`,
-      "Use --network bsc or --network bscTestnet for token commands."
+      "Run `bitagent networks` to see which networks have one."
     );
   }
 }
@@ -183790,26 +184408,26 @@ function resolveReserve(net, symbol3) {
   }
   return reserve;
 }
-function predictTokenAddress(session, symbol3) {
+async function predictTokenAddress(session, symbol3) {
   if (!session.wallet) throw new CliError("A signing wallet is required to derive the address.");
-  return session.sdk.token(symbol3.toUpperCase(), session.wallet).getTokenAddress();
+  return session.sdk.token(symbol3.toUpperCase(), session.wallet).resolveTokenAddress();
 }
 async function launchToken(session, params) {
   if (!session.canSign || !session.wallet) {
     throw new CliError("Launching a token requires a signing wallet.");
   }
   const token = session.sdk.token(params.symbol.toUpperCase(), session.wallet);
-  const tokenAddress = token.getTokenAddress();
+  const tokenAddress = await token.resolveTokenAddress();
   const receipt = await token.create({
     name: params.name,
     agentHash: params.agentHash,
     reserveToken: { address: params.reserve.address, decimals: params.reserve.decimals },
     curveData: {
-      curveType: "EXPONENTIAL",
+      curveType: params.reserve.curveType ?? "EXPONENTIAL",
       stepCount: params.reserve.stepCount,
       maxSupply: MAX_SUPPLY_AT_CURVE,
       initialMintingPrice: params.reserve.initialPrice,
-      finalMintingPrice: params.reserve.initialPrice * 10,
+      finalMintingPrice: params.reserve.finalPrice ?? params.reserve.initialPrice * 10,
       creatorAllocation: params.creatorAllocation
     },
     buyRoyalty: params.buyRoyalty,
@@ -183915,22 +184533,23 @@ init_credentials();
 init_output();
 function registerTokenCommands(program3) {
   const token = program3.command("token").description("Launch and trade agent tokens on the bonding curve");
-  token.command("launch").description("Deploy a new agent token on a bonding curve").requiredOption("--name <name>", "Project name").requiredOption("--symbol <symbol>", "Ticker, e.g. MYAGENT").option("--reserve <symbol>", "Reserve token: UB, USD1 or WBNB", "UB").option("--description <text>", "Short description shown on the project page").option("--image <url>", "Logo URL", "https://bitagent.io/logo.png").option("--buy-royalty <percent>", "Buy royalty, in percent", "1").option("--sell-royalty <percent>", "Sell royalty, in percent", "1").option("--creator-allocation <amount>", "Tokens minted to you at launch", "0").option("-y, --yes", "Skip the confirmation prompt").action(async function() {
+  token.command("launch").description("Deploy a new agent token on a bonding curve").requiredOption("--name <name>", "Project name").requiredOption("--symbol <symbol>", "Ticker, e.g. MYAGENT").option("--reserve <symbol>", "Reserve token, e.g. UB, USDC or WETH (see `bitagent networks`)", "UB").option("--description <text>", "Short description shown on the project page").option("--image <url>", "Logo URL", "https://bitagent.io/logo.png").option("--buy-royalty <percent>", "Buy royalty, in percent", "1").option("--sell-royalty <percent>", "Sell royalty, in percent", "1").option("--creator-allocation <amount>", "Tokens minted to you at launch", "0").option("-y, --yes", "Skip the confirmation prompt").action(async function() {
     const ctx = resolveContext(this);
     const options = this.opts();
     const session = openBonding(ctx);
     const reserve = resolveReserve(ctx.net, options.reserve);
     const symbol3 = options.symbol.toUpperCase();
     const description = options.description ?? `${options.name} token`;
-    const tokenAddress = predictTokenAddress(session, symbol3);
+    const tokenAddress = await predictTokenAddress(session, symbol3);
     heading("Launch");
     kv([
       ["network", `${ctx.net.label} (${ctx.net.chainId})`],
       ["name", options.name],
       ["symbol", symbol3],
       ["reserve", `${reserve.symbol} (${reserve.address})`],
-      ["curve", `exponential, ${reserve.stepCount} steps`],
+      ["curve", `${(reserve.curveType ?? "EXPONENTIAL").toLowerCase()}, ${reserve.stepCount} steps`],
       ["initial price", `${reserve.initialPrice} ${reserve.symbol}`],
+      ["final price", `${reserve.finalPrice ?? reserve.initialPrice * 10} ${reserve.symbol}`],
       ["curve supply", MAX_SUPPLY_AT_CURVE.toLocaleString("en-US")],
       ["royalties", `${options.buyRoyalty}% buy / ${options.sellRoyalty}% sell`],
       ["creator", session.wallet],
@@ -183967,6 +184586,11 @@ Launch ${symbol3} on ${ctx.net.label}?`, false)) {
       sellRoyalty: Number(options.sellRoyalty),
       creatorAllocation: Number(options.creatorAllocation)
     });
+    if (launched.tokenAddress.toLowerCase() !== tokenAddress.toLowerCase()) {
+      warn(
+        `The token deployed at ${launched.tokenAddress}, but the project was registered for ${tokenAddress}. Its BitAgent page will not find it; report both addresses to the BitAgent team.`
+      );
+    }
     const projectUrl = `${ctx.net.webBase}/agents/${launched.tokenAddress}`;
     result(
       {
@@ -184184,7 +184808,7 @@ init_errors();
 init_output();
 var require2 = createRequire(import.meta.url);
 function version7() {
-  if (true) return "0.2.0";
+  if (true) return "0.2.1";
   for (const path3 of ["../package.json", "../../package.json"]) {
     try {
       const pkg2 = require2(path3);

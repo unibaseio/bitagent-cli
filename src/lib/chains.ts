@@ -27,8 +27,16 @@ export interface ReserveToken {
   decimals: number;
   /** Bonding-curve initial minting price, in reserve token units. */
   initialPrice: number;
-  /** Number of steps in the exponential curve. */
+  /** Number of steps in the curve. */
   stepCount: number;
+  /**
+   * Curve shape; EXPONENTIAL (initial → 10× initial) unless set. 6-decimal
+   * reserves (USDC) pin a flat LINEAR curve: the exponential's small per-step
+   * rise rounds away below their 1e-6 price floor and the curve collapses.
+   */
+  curveType?: "EXPONENTIAL" | "LINEAR";
+  /** Final minting price; defaults to 10× `initialPrice`. */
+  finalPrice?: number;
 }
 
 export interface Contracts {
@@ -107,7 +115,7 @@ export const NETWORKS: Record<string, Network> = {
         address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
         decimals: 18,
         initialPrice: 8e-10,
-        stepCount: 99,
+        stepCount: 100,
       },
     },
   },
@@ -150,7 +158,7 @@ export const NETWORKS: Record<string, Network> = {
         address: "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
         decimals: 18,
         initialPrice: 8e-10,
-        stepCount: 99,
+        stepCount: 100,
       },
     },
   },
@@ -173,7 +181,34 @@ export const NETWORKS: Record<string, Network> = {
       usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       ub: "0x51d9eef6d49e2782f99d43f659d4f0cb493c28cc",
     },
-    reserves: {},
+    reserves: {
+      UB: {
+        symbol: "UB",
+        address: "0x51d9eEF6d49E2782f99D43F659d4f0cB493C28CC",
+        decimals: 18,
+        initialPrice: 8e-6,
+        stepCount: 100,
+      },
+        // 6 decimals can't price below 1e-6, so the curve is a flat 1e-6 tier
+        // (graduation ≈ 8,500 USDC at 8.5B curve supply), as on the web app.
+      USDC: {
+        symbol: "USDC",
+        address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        decimals: 6,
+        initialPrice: 1e-6,
+        stepCount: 100,
+        curveType: "LINEAR",
+        finalPrice: 1e-6,
+      },
+        // Tuned for mainnet ETH value: 8e-11 → 8e-10 graduates at ~2.7 WETH.
+      WETH: {
+        symbol: "WETH",
+        address: "0x4200000000000000000000000000000000000006",
+        decimals: 18,
+        initialPrice: 8e-11,
+        stepCount: 100,
+      },
+    },
   },
 
   baseSepolia: {
@@ -194,7 +229,33 @@ export const NETWORKS: Record<string, Network> = {
       usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
       ub: "0x27C8b63E5aCD5298035B984AC3ea3f39d522A700",
     },
-    reserves: {},
+    reserves: {
+      UB: {
+        symbol: "UB",
+        address: "0x27C8b63E5aCD5298035B984AC3ea3f39d522A700",
+        decimals: 18,
+        initialPrice: 8e-6,
+        stepCount: 100,
+      },
+        // 6 decimals can't price below 1e-6, so the curve is a flat 1e-6 tier
+        // (graduation ≈ 8,500 USDC at 8.5B curve supply), as on the web app.
+      USDC: {
+        symbol: "USDC",
+        address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        decimals: 6,
+        initialPrice: 1e-6,
+        stepCount: 100,
+        curveType: "LINEAR",
+        finalPrice: 1e-6,
+      },
+      WETH: {
+        symbol: "WETH",
+        address: "0x4200000000000000000000000000000000000006",
+        decimals: 18,
+        initialPrice: 8e-10,
+        stepCount: 100,
+      },
+    },
   },
 
   xLayerTestnet: {
@@ -215,7 +276,16 @@ export const NETWORKS: Record<string, Network> = {
       evaluator: "0xFc140Ff8108448c56c0f9FACd0c3434E83aE1568",
       usdc: "0xcb8bf24c6ce16ad21d707c9505421a17f2bec79d",
     },
-    reserves: {},
+    // UB is the only reserve here; USDC is the commerce currency, not a reserve.
+    reserves: {
+      UB: {
+        symbol: "UB",
+        address: "0x9311791A535612dC3f907Ee0b600275F292620a0",
+        decimals: 18,
+        initialPrice: 8e-6,
+        stepCount: 100,
+      },
+    },
   },
 };
 

@@ -20,7 +20,7 @@ npm install          # `prepare` builds dist/ automatically
 npm run test:smoke
 ```
 
-39 cases, ~40s. Exits non-zero if anything fails, and prints which cases.
+48 cases, ~45s. Exits non-zero if anything fails, and prints which cases.
 
 ```
  ok  networks lists 5 chains
@@ -395,7 +395,7 @@ unattended mode does before you ever use it on mainnet.
 
 ```bash
 bitagent token launch --name X --symbol Y --reserve DOGE      # unsupported reserve
-bitagent -n base token info 0xbb75…                          # launchpad not on Base
+bitagent -n base token info 0xbb75…                          # a BSC token, wrong network
 bitagent token info 0x0000000000000000000000000000000000000001  # no curve there
 ```
 
