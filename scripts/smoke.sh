@@ -149,6 +149,7 @@ VERSION=$($CLI --version 2>/dev/null)
 [ -n "$VERSION" ] && pass "--version → $VERSION" || fail "--version"
 
 t "networks lists 5 chains"        'd.length === 5 && d.some(n => n.chainId === 97)'          networks
+t "every network has a launchpad"  'd.every(n => Object.keys(n.reserves).length > 0)' networks
 t "networks carry contracts"       'd.every(n => n.contracts && n.contracts.registry)'        networks
 t "stats returns counters"         'typeof d.total_agents === "number" && d.total_agents > 0' stats
 t "browse returns both sections"   'Array.isArray(d.agents) && Array.isArray(d.services)'     browse --limit 5
@@ -162,6 +163,10 @@ t "services list"                  'Array.isArray(d.data) && d.data.length > 0 &
 t "tasks list"                     'Array.isArray(d.data) && typeof d.total === "number"'     tasks --limit 5
 t "tasks honours --limit"          'd.data.length <= 3'                                       tasks --limit 3
 t "rankings by tasks"              'Array.isArray(d) && d.length > 0 && d[0].rank === 1'      rankings --metric tasks --limit 5
+t "rankings by revenue"            'Array.isArray(d) && d.length > 0 && d[0].metric === "revenue"' rankings --limit 3
+terr "rankings rejects bad metric" -n "$NETWORK" rankings --metric bogus
+# Base runs B20 bonds (factory-assigned 0xb2… tokens), read through the SDK's B20 routing.
+t "Base B20 curve reads"           'd.symbol === "JACKET" && d.progress >= 0'                 -n base token info 0xb2000000000000000000000a29149b246957d0dc
 t "config path"                    'typeof d.path === "string" && d.path.endsWith("config.json")' config path
 t "skill check matches installed"  'd.upToDate === true'                                      skill check --against "$VERSION"
 t "skill check detects drift"      'd.upToDate === false && d.action === "reload"'            skill check --against 0.0.0
@@ -176,7 +181,9 @@ else
 fi
 
 terr "unknown network errors"      -n solana stats
-terr "launchpad gated off BSC"     -n base token launch --name X --symbol X -y
+# Must fail before any side effect, wallet or not: the reserve is checked
+# before the project is registered or a transaction is built.
+terr "unknown reserve rejected"    -n base token launch --name X --symbol X --reserve NOPE -y
 terr "bad token address rejected"  -n "$NETWORK" token info not-an-address
 
 case "$NETWORK" in

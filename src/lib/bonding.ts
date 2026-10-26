@@ -1,8 +1,8 @@
 /**
  * Bonding-curve launchpad, wrapping `@bitagent/sdk`.
  *
- * A BitAgent project token lives on an exponential bonding curve backed by a
- * reserve token (UB / USD1 / WBNB) and graduates to a DEX. Launching is a
+ * A BitAgent project token lives on a bonding curve backed by a reserve token
+ * (per network, see `chains.ts`) and graduates to a DEX. Launching is a
  * two-phase operation: register the agent record off-chain to obtain the
  * `agentHash`, then deploy the curve on-chain referencing that hash.
  */
@@ -36,12 +36,12 @@ export interface BondingSession {
   sdk: ReturnType<typeof bitagent.network>;
 }
 
-/** Only the BSC deployment exposes the launchpad. */
+/** Networks without reserve tokens have no launchpad. */
 export function requireLaunchpad(net: Network): void {
   if (Object.keys(net.reserves).length === 0) {
     throw new CliError(
       `The bonding-curve launchpad is not available on ${net.label}.`,
-      "Use --network bsc or --network bscTestnet for token commands.",
+      "Run `bitagent networks` to see which networks have one.",
     );
   }
 }
@@ -101,10 +101,18 @@ export interface LaunchResult {
   receipt: TransactionReceipt;
 }
 
-/** Deterministic token address for a symbol + creator, known before deploy. */
-export function predictTokenAddress(session: BondingSession, symbol: string): `0x${string}` {
+/**
+ * The address the token will have once deployed, known before deploy. It must
+ * match the on-chain token: the agent record registered first is keyed by it.
+ * B20 tokens (Base) come from a factory rather than CREATE2, so the SDK reads
+ * the address on-chain; elsewhere this is the CREATE2 address.
+ */
+export async function predictTokenAddress(
+  session: BondingSession,
+  symbol: string,
+): Promise<`0x${string}`> {
   if (!session.wallet) throw new CliError("A signing wallet is required to derive the address.");
-  return session.sdk.token(symbol.toUpperCase(), session.wallet).getTokenAddress();
+  return session.sdk.token(symbol.toUpperCase(), session.wallet).resolveTokenAddress();
 }
 
 export async function launchToken(
@@ -115,18 +123,18 @@ export async function launchToken(
     throw new CliError("Launching a token requires a signing wallet.");
   }
   const token = session.sdk.token(params.symbol.toUpperCase(), session.wallet);
-  const tokenAddress = token.getTokenAddress();
+  const tokenAddress = await token.resolveTokenAddress();
 
   const receipt = await token.create({
     name: params.name,
     agentHash: params.agentHash as `0x${string}`,
     reserveToken: { address: params.reserve.address, decimals: params.reserve.decimals },
     curveData: {
-      curveType: "EXPONENTIAL",
+      curveType: params.reserve.curveType ?? "EXPONENTIAL",
       stepCount: params.reserve.stepCount,
       maxSupply: MAX_SUPPLY_AT_CURVE,
       initialMintingPrice: params.reserve.initialPrice,
-      finalMintingPrice: params.reserve.initialPrice * 10,
+      finalMintingPrice: params.reserve.finalPrice ?? params.reserve.initialPrice * 10,
       creatorAllocation: params.creatorAllocation,
     },
     buyRoyalty: params.buyRoyalty,

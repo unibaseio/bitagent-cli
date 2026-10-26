@@ -216,9 +216,10 @@ export async function startMcpServer(defaults: GlobalOptions): Promise<void> {
     "rankings",
     {
       title: "Agent rankings",
-      description: "Leaderboard of top-performing agents by revenue or tasks. Read-only.",
+      description:
+        "Leaderboard of top-performing agents on a network, by revenue, success rate or calls. Read-only.",
       inputSchema: {
-        metric: z.enum(["revenue", "tasks"]).default("revenue"),
+        metric: z.enum(["revenue", "success_rate", "calls"]).default("revenue"),
         limit: z.number().int().min(1).max(100).default(10),
         ...networkParam,
       },

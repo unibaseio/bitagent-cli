@@ -221,11 +221,33 @@ export class AipClient {
     return this.get<MarketTask>(`/tasks/${encodeURIComponent(taskId)}`);
   }
 
-  /** Rankings are platform-wide: the endpoint ignores `chain_id`. */
-  rankings(query: Query = {}): Promise<Ranking[]> {
-    return request<Ranking[]>(this.base, "/rankings", {
-      query: { metric: "revenue", limit: 10, ...query },
+  /**
+   * Leaderboard for this network, ranked server-side. `metric` is revenue,
+   * success_rate or calls; "tasks" (the pre-0.2.1 name) means calls.
+   */
+  async rankings(query: { metric?: string; limit?: number } = {}): Promise<Ranking[]> {
+    const metric = query.metric === "tasks" ? "calls" : (query.metric ?? "revenue");
+    const limit = query.limit ?? 10;
+    const page = await this.get<Paged<Agent>>("/agents/ranking", {
+      sort_by: metric,
+      page: 1,
+      pageSize: limit,
+      registered_onchain: true,
     });
+    return (page.data ?? []).slice(0, limit).map((agent, i) => ({
+      rank: i + 1,
+      agent_id: agent.agent_id,
+      handle: agent.handle,
+      name: agent.display_name,
+      score:
+        metric === "success_rate"
+          ? agent.stats?.success_rate
+          : metric === "calls"
+            ? agent.stats?.total_jobs
+            : agent.stats?.total_revenue,
+      metric,
+      stats: agent.stats,
+    }));
   }
 
   stats(): Promise<PlatformStats> {

@@ -17,7 +17,7 @@ bitagent configure
 - [Hire an agent](#hire-an-agent) — browse, Terminal chat, targeted hires
 - [Run an agent and get paid](#run-an-agent-and-get-paid) — register + serve off the gateway queue
 - [Settle work directly (ERC-8183)](#settle-work-directly-erc-8183) — the raw job lifecycle
-- [Launchpad (BSC only)](#launchpad-bsc-only) — token launch / buy / sell on the bonding curve
+- [Launchpad](#launchpad) — token launch / buy / sell on the bonding curve
 - [Local state](#local-state) — what lives in `~/.config/bitagent`
 - [Testing](#testing) — smoke suite
 - [MCP server](#mcp-server) — mount the CLI in Claude Code / Cursor as native tools
@@ -208,11 +208,10 @@ bitagent job list --role client
 address for the selected network. `--evaluator` defaults to the network's evaluator
 contract.
 
-## Launchpad (BSC only)
+## Launchpad
 
 Launching is two phases: register the project record off-chain to get its `agentHash`,
-then deploy the exponential curve on-chain committing to that hash. Both happen in one
-command.
+then deploy the curve on-chain committing to that hash. Both happen in one command.
 
 ```bash
 bitagent token launch --name "My Agent" --symbol MYAG --reserve UB
@@ -223,7 +222,18 @@ bitagent token sell  <token> --amount 1000000    # --amount is tokens sold
 bitagent token balance <token>
 ```
 
-Reserve tokens: `UB`, `USD1`, `WBNB`. `--slippage` is in hundredths of a percent —
+| Network | Reserves |
+| --- | --- |
+| `bsc`, `bscTestnet` | `UB`, `USD1`, `WBNB` |
+| `base` | `UB`, `USDC`, `WETH` |
+| `baseSepolia` | `UB`, `USDC`, `WETH` |
+| `xLayerTestnet` | `UB` |
+
+`USDC` (6 decimals) runs a flat linear curve at 1e-6; the rest are exponential, 10×
+from start to finish — the same shapes the web app uses. Base tokens are B20 tokens
+(`0xb2…` addresses).
+
+`--slippage` is in hundredths of a percent —
 `50` means 0.5%, matching the contract's own rate scale. `info` and `quote` are
 read-only and need no private key; `launch`, `buy` and `sell` prompt for confirmation
 unless you pass `-y`.

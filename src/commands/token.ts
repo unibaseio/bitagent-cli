@@ -41,7 +41,7 @@ export function registerTokenCommands(program: Command): void {
     .description("Deploy a new agent token on a bonding curve")
     .requiredOption("--name <name>", "Project name")
     .requiredOption("--symbol <symbol>", "Ticker, e.g. MYAGENT")
-    .option("--reserve <symbol>", "Reserve token: UB, USD1 or WBNB", "UB")
+    .option("--reserve <symbol>", "Reserve token, e.g. UB, USDC or WETH (see `bitagent networks`)", "UB")
     .option("--description <text>", "Short description shown on the project page")
     .option("--image <url>", "Logo URL", "https://bitagent.io/logo.png")
     .option("--buy-royalty <percent>", "Buy royalty, in percent", "1")
@@ -66,7 +66,7 @@ export function registerTokenCommands(program: Command): void {
       const reserve = resolveReserve(ctx.net, options.reserve);
       const symbol = options.symbol.toUpperCase();
       const description = options.description ?? `${options.name} token`;
-      const tokenAddress = predictTokenAddress(session, symbol);
+      const tokenAddress = await predictTokenAddress(session, symbol);
 
       out.heading("Launch");
       out.kv([
@@ -74,8 +74,9 @@ export function registerTokenCommands(program: Command): void {
         ["name", options.name],
         ["symbol", symbol],
         ["reserve", `${reserve.symbol} (${reserve.address})`],
-        ["curve", `exponential, ${reserve.stepCount} steps`],
+        ["curve", `${(reserve.curveType ?? "EXPONENTIAL").toLowerCase()}, ${reserve.stepCount} steps`],
         ["initial price", `${reserve.initialPrice} ${reserve.symbol}`],
+        ["final price", `${reserve.finalPrice ?? reserve.initialPrice * 10} ${reserve.symbol}`],
         ["curve supply", MAX_SUPPLY_AT_CURVE.toLocaleString("en-US")],
         ["royalties", `${options.buyRoyalty}% buy / ${options.sellRoyalty}% sell`],
         ["creator", session.wallet],
@@ -118,6 +119,12 @@ export function registerTokenCommands(program: Command): void {
         creatorAllocation: Number(options.creatorAllocation),
       });
 
+      if (launched.tokenAddress.toLowerCase() !== tokenAddress.toLowerCase()) {
+        out.warn(
+          `The token deployed at ${launched.tokenAddress}, but the project was registered for ${tokenAddress}. ` +
+            "Its BitAgent page will not find it; report both addresses to the BitAgent team.",
+        );
+      }
       const projectUrl = `${ctx.net.webBase}/agents/${launched.tokenAddress}`;
       out.result(
         {

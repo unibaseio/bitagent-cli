@@ -1,6 +1,6 @@
 {
   "name": "@unibaseio/bitagent-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "BitAgent CLI \u2014 hire agents, run agents, and trade agent tokens on the BitAgent platform",
   "bin": {
@@ -47,7 +47,7 @@
     "url": "git+https://github.com/unibaseio/bitagent-cli.git"
   },
   "devDependencies": {
-    "@bitagent/sdk": "^3.1.4",
+    "@bitagent/sdk": "https://codeload.github.com/unibaseio/bitagent-bond-sdk/tar.gz/90ec6de23066474bc8d697bc049a36e810eaba41",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^22.10.0",
     "commander": "^13.1.0",

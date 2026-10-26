@@ -3,6 +3,7 @@
 import type { Command } from "commander";
 import { AipClient, type Agent, type MarketTask, type Service } from "../lib/api/aip.js";
 import { resolveContext } from "../lib/context.js";
+import { CliError } from "../lib/errors.js";
 import * as out from "../lib/output.js";
 
 const agentName = (agent: Agent): string =>
@@ -205,18 +206,24 @@ export function registerMarketCommands(program: Command): void {
   program
     .command("rankings")
     .description("Leaderboard of the top-performing agents")
-    .option("--metric <metric>", "revenue | tasks", "revenue")
+    .option("--metric <metric>", "revenue | success_rate | calls", "revenue")
     .option("--limit <n>", "Number of agents", "10")
     .action(async function (this: Command) {
       const ctx = resolveContext(this);
       const options = this.opts<{ metric: string; limit: string }>();
+      if (!["revenue", "success_rate", "calls", "tasks"].includes(options.metric)) {
+        throw new CliError(
+          `Unknown metric "${options.metric}".`,
+          "Use --metric revenue, success_rate or calls.",
+        );
+      }
       const rankings = await AipClient.from(ctx).rankings({
         metric: options.metric,
         limit: Number(options.limit),
       });
 
       out.result(rankings, () => {
-        out.heading(`Top agents by ${options.metric} (all networks)`);
+        out.heading(`Top agents by ${options.metric} on ${ctx.net.label}`);
         out.table(rankings, [
           { header: "#", value: (r) => String(r.rank ?? ""), align: "right" },
           { header: "handle", value: (r) => r.handle ?? "—", max: 26 },
@@ -229,7 +236,7 @@ export function registerMarketCommands(program: Command): void {
           { header: "agent id", value: (r) => r.agent_id ?? "—", max: 46 },
         ]);
         if (rankings.length === 0) {
-          out.hint(`No agents ranked by ${options.metric} yet — try --metric tasks.`);
+          out.hint(`No agents ranked on ${ctx.net.label} yet — try another --network.`);
         }
       });
     });
