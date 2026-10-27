@@ -43,7 +43,8 @@ Two interchangeable credentials, the same pair the AIP SDKs use:
   transaction (`token launch`, `token buy`, `token sell`). Never transmitted: the address
   is derived locally and messages are signed locally.
 
-The JWT wins when both are set. Credentials resolve from the environment, then
+The JWT wins for API calls when both are set; anything that signs (`token
+launch/buy/sell`) uses the private key regardless. Each resolves from the environment, then
 `~/.config/bitagent/config.json`, then `~/.config/unibase-aip-sdk/config.json` — so a
 machine that already authorized a Python / Go / TypeScript AIP SDK is authorized here too.
 
@@ -233,8 +234,10 @@ bitagent token balance <token>
 from start to finish — the same shapes the web app uses. Base tokens are B20 tokens
 (`0xb2…` addresses).
 
-`--slippage` is in hundredths of a percent —
-`50` means 0.5%, matching the contract's own rate scale. `info` and `quote` are
+`--slippage` is a whole number of hundredths of a percent — `50` means 0.5%. A few
+values the bond SDK can't express (7, 14, …) move to the nearest that it can, at most 0.04%
+away; the summary shows the slippage applied. Trades approve exactly what they can
+spend, never an unlimited allowance. `info` and `quote` are
 read-only and need no private key; `launch`, `buy` and `sell` prompt for confirmation
 unless you pass `-y`.
 

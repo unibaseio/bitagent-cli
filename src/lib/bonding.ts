@@ -21,8 +21,39 @@ export const BOND_VERSION = "3.1.0" as Version;
 /** Token supply allocated to the curve before graduation. */
 export const MAX_SUPPLY_AT_CURVE = 8_500_000_000;
 
-/** Default slippage in basis-point-like SDK units (50 = 0.5%). */
+/** Default slippage, in hundredths of a percent (50 = 0.5%). */
 export const DEFAULT_SLIPPAGE = 50;
+
+/**
+ * The SDK's slippage for a CLI value. The CLI takes hundredths of a percent
+ * (bps, 50 = 0.5%); the SDK takes percent and computes `BigInt(slippage * 100)`,
+ * which throws unless that product is an exact integer — and 29 / 100 * 100 is
+ * 28.999999999999996. So find a double that multiplies back to exactly the
+ * bps. A few values (7, 14, 3249, …) have none; they move to the nearest that
+ * has one, at most 4 bps away. Returns the SDK value and the bps it applies.
+ */
+export function sdkSlippage(bps: number): { value: number; bps: number } {
+  if (!Number.isInteger(bps) || bps < 0) {
+    throw new CliError(`Slippage must be a whole number of hundredths of a percent, got ${bps}.`);
+  }
+  for (const near of [bps, bps + 1, bps - 1, bps + 2, bps - 2, bps + 3, bps - 3, bps + 4, bps - 4]) {
+    const value = near >= 0 ? exactPercent(near) : undefined;
+    if (value !== undefined) return { value, bps: near };
+  }
+  throw new CliError(`Slippage ${bps} can't be expressed for the SDK.`);
+}
+
+/** A double x with x * 100 === bps exactly, from the few doubles around bps / 100. */
+function exactPercent(bps: number): number | undefined {
+  const view = new DataView(new ArrayBuffer(8));
+  for (const step of [0n, 1n, -1n, 2n, -2n, 3n, -3n]) {
+    view.setFloat64(0, bps / 100);
+    view.setBigInt64(0, view.getBigInt64(0) + step);
+    const candidate = view.getFloat64(0);
+    if (candidate * 100 === bps) return candidate;
+  }
+  return undefined;
+}
 
 type TokenHelper = ReturnType<ReturnType<typeof bitagent.network>["token"]>;
 
@@ -35,6 +66,15 @@ export interface BondingSession {
   /** SDK bound to a public client, and to a wallet client when signing. */
   sdk: ReturnType<typeof bitagent.network>;
 }
+
+/**
+ * Set when a signing session opens. With a private key the SDK sends through
+ * its own viem `fallback` transport with RPC ranking on: a timer that keeps the
+ * event loop alive for good. The entrypoint exits explicitly once such a
+ * command is done, or launch / buy / sell would never return.
+ */
+let signingSessionOpened = false;
+export const signingSessionWasOpened = (): boolean => signingSessionOpened;
 
 /** Networks without reserve tokens have no launchpad. */
 export function requireLaunchpad(net: Network): void {
@@ -63,6 +103,7 @@ export function openBonding(ctx: Ctx, options: { readOnly?: boolean } = {}): Bon
   }
 
   const account = requireAccount();
+  signingSessionOpened = true;
   const walletClient = walletClientFor(ctx.net, ctx.rpcUrl);
   const sdk = bitagent
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -263,11 +304,44 @@ export async function executeTrade(
   token: TokenHelper,
   side: "buy" | "sell",
   amount: bigint,
-  slippage: number,
+  slippage: { value: number; bps: number },
+  wallet: `0x${string}`,
 ): Promise<TransactionReceipt> {
+  // The SDK starts its approval without waiting for it and simulates the
+  // trade straight away, so any trade that needs a new allowance reverts.
+  // Approve exactly what this trade can spend (the SDK's own bound: the
+  // estimate plus slippage for a buy, the tokens for a sell) and wait for it.
+  const spend =
+    side === "buy"
+      ? await token.getBuyEstimation(amount).then(([estimate]) => estimate + (estimate * BigInt(slippage.bps)) / 10_000n)
+      : amount;
+  if (!(await token.bondContractApproved({ walletAddress: wallet, amountToSpend: spend, tradeType: side }))) {
+    out.step(`Approving ${side === "buy" ? "the reserve token" : "the token"} for this ${side} …`);
+    // `approveBond` is TypeScript-private but a plain method at runtime; it
+    // picks the token to approve and the bond (B20 on Base) the same way the
+    // trade will.
+    const sdk = token as unknown as {
+      approveBond(p: {
+        tradeType: "buy" | "sell";
+        allowanceAmount: bigint;
+        onError: (e: unknown) => void;
+      }): Promise<TransactionReceipt | undefined>;
+    };
+    const approval = await sdk.approveBond({
+      tradeType: side,
+      allowanceAmount: spend,
+      onError: (e: unknown) => {
+        throw asCliError(e, "The approval failed.");
+      },
+    });
+    if (!approval || approval.status !== "success") {
+      throw new CliError("The approval did not succeed.");
+    }
+  }
+
   const params = {
     amount,
-    slippage,
+    slippage: slippage.value,
     onError: (e: unknown) => {
       throw asCliError(e, `The ${side} transaction failed.`);
     },

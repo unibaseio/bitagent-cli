@@ -20,7 +20,7 @@ npm install          # `prepare` builds dist/ automatically
 npm run test:smoke
 ```
 
-48 cases, ~45s. Exits non-zero if anything fails, and prints which cases.
+49 cases, ~45s. Exits non-zero if anything fails, and prints which cases.
 
 ```
  ok  networks lists 5 chains

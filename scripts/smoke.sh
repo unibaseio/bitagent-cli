@@ -148,6 +148,12 @@ printf '%s\n' "$(dim '── tier 0 — no credential, read-only ──')"
 VERSION=$($CLI --version 2>/dev/null)
 [ -n "$VERSION" ] && pass "--version → $VERSION" || fail "--version"
 
+# The CLI's bps must reach the bond SDK as a value its BigInt(x * 100) accepts.
+if npx tsx scripts/check-slippage.ts >"$WORKDIR/slip.out" 2>&1; then
+  pass "slippage converts for the SDK"
+else
+  fail "slippage converts for the SDK" "$(tail -c 200 "$WORKDIR/slip.out")"
+fi
 t "networks lists 5 chains"        'd.length === 5 && d.some(n => n.chainId === 97)'          networks
 t "every network has a launchpad"  'd.every(n => Object.keys(n.reserves).length > 0)' networks
 t "networks carry contracts"       'd.every(n => n.contracts && n.contracts.registry)'        networks

@@ -60354,6 +60354,14 @@ var require_picocolors = __commonJS({
 });
 
 // src/lib/output.ts
+async function exitWhenFlushed(code2 = 0) {
+  await Promise.all(
+    [process.stdout, process.stderr].map(
+      (stream4) => new Promise((resolve4) => stream4.write("", () => resolve4()))
+    )
+  );
+  process.exit(code2);
+}
 function result(data, render) {
   if (jsonMode) {
     process.stdout.write(JSON.stringify(data, jsonReplacer, 2) + "\n");
@@ -60368,13 +60376,13 @@ function kv(pairs, indent = "  ") {
   const shown = pairs.filter(([, v]) => v !== void 0 && v !== null && v !== "");
   const width = shown.reduce((max, [k]) => Math.max(max, k.length), 0);
   for (const [key, value] of shown) {
-    process.stdout.write(`${indent}${import_picocolors.default.dim((key + ":").padEnd(width + 1))} ${format3(value)}
+    human().write(`${indent}${import_picocolors.default.dim((key + ":").padEnd(width + 1))} ${format3(value)}
 `);
   }
 }
 function table(rows, columns) {
   if (rows.length === 0) {
-    process.stdout.write(import_picocolors.default.dim("  (no results)\n"));
+    human().write(import_picocolors.default.dim("  (no results)\n"));
     return;
   }
   const cells = rows.map(
@@ -60388,7 +60396,7 @@ function table(rows, columns) {
       const width = widths[i] ?? value.length;
       return columns[i]?.align === "right" ? value.padStart(width) : value.padEnd(width);
     }).join("  ").trimEnd();
-    process.stdout.write((dim ? import_picocolors.default.dim(text) : text) + "\n");
+    human().write((dim ? import_picocolors.default.dim(text) : text) + "\n");
   };
   line(
     columns.map((c) => c.header.toUpperCase()),
@@ -60409,7 +60417,7 @@ function format3(value) {
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
-var import_picocolors, jsonMode, setJsonMode, isJsonMode, stderr, info, step2, success, warn, fail, hint, heading, link;
+var import_picocolors, jsonMode, setJsonMode, isJsonMode, human, stderr, info, step2, success, warn, fail, hint, heading, link;
 var init_output = __esm({
   "src/lib/output.ts"() {
     "use strict";
@@ -60419,6 +60427,7 @@ var init_output = __esm({
       jsonMode = enabled;
     };
     isJsonMode = () => jsonMode;
+    human = () => jsonMode ? process.stderr : process.stdout;
     stderr = (line) => {
       process.stderr.write(line + "\n");
     };
@@ -60429,7 +60438,7 @@ var init_output = __esm({
     fail = (message) => stderr(import_picocolors.default.red("\u2716 ") + message);
     hint = (message) => stderr(import_picocolors.default.dim("  " + message));
     heading = (text) => {
-      process.stdout.write("\n" + import_picocolors.default.bold(text) + "\n");
+      human().write("\n" + import_picocolors.default.bold(text) + "\n");
     };
     link = (url4) => import_picocolors.default.cyan(import_picocolors.default.underline(url4));
   }
@@ -99842,14 +99851,16 @@ function resolveCredentials() {
   }
   const sdkToken = sdkCredential("UNIBASE_PROXY_AUTH");
   if (sdkToken) return jwtCredentials(sdkToken, "aip-sdk config UNIBASE_PROXY_AUTH");
+  return resolveKey() ?? { mode: "none", token: "", privateKey: "", wallet: "", source: "" };
+}
+function resolveKey() {
   const envKey = process.env.UNIBASE_WALLET_PRIVATE_KEY?.trim() || process.env.PRIVATE_KEY?.trim();
   if (envKey) return keyCredentials(envKey, "env UNIBASE_WALLET_PRIVATE_KEY");
-  if (config2.UNIBASE_WALLET_PRIVATE_KEY) {
-    return keyCredentials(config2.UNIBASE_WALLET_PRIVATE_KEY, "config UNIBASE_WALLET_PRIVATE_KEY");
-  }
+  const configKey = loadConfig().UNIBASE_WALLET_PRIVATE_KEY;
+  if (configKey) return keyCredentials(configKey, "config UNIBASE_WALLET_PRIVATE_KEY");
   const sdkKey = sdkCredential("UNIBASE_WALLET_PRIVATE_KEY");
   if (sdkKey) return keyCredentials(sdkKey, "aip-sdk config UNIBASE_WALLET_PRIVATE_KEY");
-  return { mode: "none", token: "", privateKey: "", wallet: "", source: "" };
+  return void 0;
 }
 function jwtCredentials(token, source) {
   return { mode: "jwt", token, privateKey: "", wallet: walletFromToken(token), source };
@@ -99881,8 +99892,8 @@ function requireCredentials() {
   return credentials;
 }
 function requireAccount() {
-  const credentials = requireCredentials();
-  if (credentials.mode !== "key") {
+  const credentials = resolveKey();
+  if (!credentials) {
     throw new CliError(
       "This command signs on-chain transactions and needs a wallet private key.",
       "Run `bitagent configure` and choose the private-key method, or set UNIBASE_WALLET_PRIVATE_KEY."
@@ -132526,7 +132537,7 @@ var init_mcp2 = __esm({
     init_context();
     init_credentials();
     init_chains2();
-    serverVersion = () => true ? "0.2.1" : "0.0.0";
+    serverVersion = () => true ? "0.2.2" : "0.0.0";
     networkNames2 = Object.values(NETWORKS).map((n) => n.name).join(" | ");
     ok = (data) => ({
       content: [{ type: "text", text: JSON.stringify(data, null, 2) }]
@@ -184378,6 +184389,28 @@ init_output();
 var BOND_VERSION = "3.1.0";
 var MAX_SUPPLY_AT_CURVE = 85e8;
 var DEFAULT_SLIPPAGE = 50;
+function sdkSlippage(bps) {
+  if (!Number.isInteger(bps) || bps < 0) {
+    throw new CliError(`Slippage must be a whole number of hundredths of a percent, got ${bps}.`);
+  }
+  for (const near2 of [bps, bps + 1, bps - 1, bps + 2, bps - 2, bps + 3, bps - 3, bps + 4, bps - 4]) {
+    const value = near2 >= 0 ? exactPercent(near2) : void 0;
+    if (value !== void 0) return { value, bps: near2 };
+  }
+  throw new CliError(`Slippage ${bps} can't be expressed for the SDK.`);
+}
+function exactPercent(bps) {
+  const view = new DataView(new ArrayBuffer(8));
+  for (const step3 of [0n, 1n, -1n, 2n, -2n, 3n, -3n]) {
+    view.setFloat64(0, bps / 100);
+    view.setBigInt64(0, view.getBigInt64(0) + step3);
+    const candidate = view.getFloat64(0);
+    if (candidate * 100 === bps) return candidate;
+  }
+  return void 0;
+}
+var signingSessionOpened = false;
+var signingSessionWasOpened = () => signingSessionOpened;
 function requireLaunchpad(net) {
   if (Object.keys(net.reserves).length === 0) {
     throw new CliError(
@@ -184394,6 +184427,7 @@ function openBonding(ctx, options = {}) {
     return { net: ctx.net, wallet: "", canSign: false, sdk: sdk2 };
   }
   const account = requireAccount();
+  signingSessionOpened = true;
   const walletClient = walletClientFor(ctx.net, ctx.rpcUrl);
   const sdk = bitagent.withWalletClient(walletClient).withPublicClient(publicClient).network(ctx.net.chainId, BOND_VERSION);
   return { net: ctx.net, wallet: account.address, canSign: true, sdk };
@@ -184503,10 +184537,25 @@ async function quoteSell(token, tokenAmount) {
     reserveDecimals: detail.info.reserveDecimals
   };
 }
-async function executeTrade(token, side, amount, slippage) {
+async function executeTrade(token, side, amount, slippage, wallet) {
+  const spend = side === "buy" ? await token.getBuyEstimation(amount).then(([estimate]) => estimate + estimate * BigInt(slippage.bps) / 10000n) : amount;
+  if (!await token.bondContractApproved({ walletAddress: wallet, amountToSpend: spend, tradeType: side })) {
+    step2(`Approving ${side === "buy" ? "the reserve token" : "the token"} for this ${side} \u2026`);
+    const sdk = token;
+    const approval = await sdk.approveBond({
+      tradeType: side,
+      allowanceAmount: spend,
+      onError: (e) => {
+        throw asCliError(e, "The approval failed.");
+      }
+    });
+    if (!approval || approval.status !== "success") {
+      throw new CliError("The approval did not succeed.");
+    }
+  }
   const params = {
     amount,
-    slippage,
+    slippage: slippage.value,
     onError: (e) => {
       throw asCliError(e, `The ${side} transaction failed.`);
     },
@@ -184754,11 +184803,15 @@ async function openToken(ctx, tokenAddress, options = {}) {
 async function trade(command, side, tokenAddress) {
   const ctx = resolveContext(command);
   const options = command.opts();
-  const slippage = Number(options.slippage);
-  if (!Number.isFinite(slippage) || slippage < 0) {
-    throw new CliError(`Invalid --slippage "${options.slippage}".`);
+  const requested = Number(options.slippage);
+  if (!Number.isInteger(requested) || requested < 0) {
+    throw new CliError(
+      `Invalid --slippage "${options.slippage}".`,
+      "Use a whole number of hundredths of a percent, e.g. 50 for 0.5%."
+    );
   }
-  const { handle, detail } = await openToken(ctx, tokenAddress);
+  const slippage = sdkSlippage(requested);
+  const { session, handle, detail } = await openToken(ctx, tokenAddress);
   const quote = side === "buy" ? await quoteBuy(handle, parseUnits(options.amount, detail.reserveDecimals)) : await quoteSell(handle, parseEther(options.amount));
   const tokens = formatEther2(quote.tokenAmount);
   const reserve = formatUnits(quote.reserveAmount, quote.reserveDecimals);
@@ -184768,7 +184821,10 @@ async function trade(command, side, tokenAddress) {
     ["token", tokenAddress],
     [side === "buy" ? "you spend" : "you receive", `${reserve} ${quote.reserveSymbol}`],
     [side === "buy" ? "you receive" : "you sell", `${tokens} ${detail.symbol}`],
-    ["slippage", `${slippage / 100}%`]
+    [
+      "slippage",
+      slippage.bps === requested ? `${slippage.bps / 100}%` : `${slippage.bps / 100}% (${requested / 100}% can't be expressed for the SDK)`
+    ]
   ]);
   if (!options.yes) {
     const label = side === "buy" ? `Spend ${reserve} ${quote.reserveSymbol}` : `Sell ${tokens} ${detail.symbol}`;
@@ -184777,7 +184833,7 @@ ${label} on ${ctx.net.label}?`, false)) {
       throw new CliError("Cancelled.");
     }
   }
-  const receipt = await executeTrade(handle, side, quote.tokenAmount, slippage);
+  const receipt = await executeTrade(handle, side, quote.tokenAmount, slippage, session.wallet);
   result(
     {
       side,
@@ -184808,7 +184864,7 @@ init_errors();
 init_output();
 var require2 = createRequire(import.meta.url);
 function version7() {
-  if (true) return "0.2.1";
+  if (true) return "0.2.2";
   for (const path3 of ["../package.json", "../../package.json"]) {
     try {
       const pkg2 = require2(path3);
@@ -184877,6 +184933,7 @@ try {
 } catch (error51) {
   report2(error51);
 }
+if (signingSessionWasOpened()) await exitWhenFlushed(0);
 /*! Bundled license information:
 
 @noble/hashes/esm/utils.js:
