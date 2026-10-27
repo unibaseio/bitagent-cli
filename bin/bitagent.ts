@@ -18,6 +18,7 @@ import { registerMcpCommand } from "../src/commands/mcp.js";
 import { registerSkillCommands } from "../src/commands/skill.js";
 import { registerTerminalCommands } from "../src/commands/terminal.js";
 import { registerTokenCommands } from "../src/commands/token.js";
+import { signingSessionWasOpened } from "../src/lib/bonding.js";
 import { networkChoicesHelp } from "../src/lib/context.js";
 import { isCliError } from "../src/lib/errors.js";
 import * as out from "../src/lib/output.js";
@@ -120,3 +121,6 @@ try {
 } catch (error) {
   report(error);
 }
+
+// The bonding SDK leaves a timer running after a signed transaction.
+if (signingSessionWasOpened()) await out.exitWhenFlushed(0);

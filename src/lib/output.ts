@@ -17,6 +17,13 @@ export const setJsonMode = (enabled: boolean): void => {
 
 export const isJsonMode = (): boolean => jsonMode;
 
+/**
+ * Where human-readable output goes. In `--json` mode stdout carries only the
+ * result document, so headings, key/value blocks and tables printed before it
+ * (a launch summary, say) go to stderr with the other logs.
+ */
+const human = (): NodeJS.WriteStream => (jsonMode ? process.stderr : process.stdout);
+
 const stderr = (line: string): void => {
   process.stderr.write(line + "\n");
 };
@@ -34,6 +41,16 @@ export const fail = (message: string): void => stderr(pc.red("✖ ") + message);
 
 export const hint = (message: string): void => stderr(pc.dim("  " + message));
 
+/** Exit once stdout and stderr have flushed, so piped output is not cut short. */
+export async function exitWhenFlushed(code = 0): Promise<never> {
+  await Promise.all(
+    [process.stdout, process.stderr].map(
+      (stream) => new Promise<void>((resolve) => stream.write("", () => resolve())),
+    ),
+  );
+  process.exit(code);
+}
+
 /** The command's result. Prints JSON in `--json` mode, otherwise `render()`. */
 export function result(data: unknown, render: () => void): void {
   if (jsonMode) {
@@ -49,7 +66,7 @@ function jsonReplacer(_key: string, value: unknown): unknown {
 }
 
 export const heading = (text: string): void => {
-  process.stdout.write("\n" + pc.bold(text) + "\n");
+  human().write("\n" + pc.bold(text) + "\n");
 };
 
 /** Aligned `key: value` block. Undefined and empty values are skipped. */
@@ -57,7 +74,7 @@ export function kv(pairs: Array<[string, unknown]>, indent = "  "): void {
   const shown = pairs.filter(([, v]) => v !== undefined && v !== null && v !== "");
   const width = shown.reduce((max, [k]) => Math.max(max, k.length), 0);
   for (const [key, value] of shown) {
-    process.stdout.write(`${indent}${pc.dim((key + ":").padEnd(width + 1))} ${format(value)}\n`);
+    human().write(`${indent}${pc.dim((key + ":").padEnd(width + 1))} ${format(value)}\n`);
   }
 }
 
@@ -72,7 +89,7 @@ export interface Column<T> {
 
 export function table<T>(rows: T[], columns: Array<Column<T>>): void {
   if (rows.length === 0) {
-    process.stdout.write(pc.dim("  (no results)\n"));
+    human().write(pc.dim("  (no results)\n"));
     return;
   }
 
@@ -91,7 +108,7 @@ export function table<T>(rows: T[], columns: Array<Column<T>>): void {
       })
       .join("  ")
       .trimEnd();
-    process.stdout.write((dim ? pc.dim(text) : text) + "\n");
+    human().write((dim ? pc.dim(text) : text) + "\n");
   };
 
   line(

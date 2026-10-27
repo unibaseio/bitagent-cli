@@ -11,6 +11,7 @@ import { BitagentClient } from "../lib/api/bitagent.js";
 import {
   BOND_VERSION,
   DEFAULT_SLIPPAGE,
+  sdkSlippage,
   MAX_SUPPLY_AT_CURVE,
   curveDetail,
   executeTrade,
@@ -349,12 +350,16 @@ async function openToken(
 async function trade(command: Command, side: "buy" | "sell", tokenAddress: string): Promise<void> {
   const ctx = resolveContext(command);
   const options = command.opts<{ amount: string; slippage: string; yes?: boolean }>();
-  const slippage = Number(options.slippage);
-  if (!Number.isFinite(slippage) || slippage < 0) {
-    throw new CliError(`Invalid --slippage "${options.slippage}".`);
+  const requested = Number(options.slippage);
+  if (!Number.isInteger(requested) || requested < 0) {
+    throw new CliError(
+      `Invalid --slippage "${options.slippage}".`,
+      "Use a whole number of hundredths of a percent, e.g. 50 for 0.5%.",
+    );
   }
+  const slippage = sdkSlippage(requested);
 
-  const { handle, detail } = await openToken(ctx, tokenAddress);
+  const { session, handle, detail } = await openToken(ctx, tokenAddress);
 
   const quote =
     side === "buy"
@@ -370,7 +375,12 @@ async function trade(command: Command, side: "buy" | "sell", tokenAddress: strin
     ["token", tokenAddress],
     [side === "buy" ? "you spend" : "you receive", `${reserve} ${quote.reserveSymbol}`],
     [side === "buy" ? "you receive" : "you sell", `${tokens} ${detail.symbol}`],
-    ["slippage", `${slippage / 100}%`],
+    [
+      "slippage",
+      slippage.bps === requested
+        ? `${slippage.bps / 100}%`
+        : `${slippage.bps / 100}% (${requested / 100}% can't be expressed for the SDK)`,
+    ],
   ]);
 
   if (!options.yes) {
@@ -381,7 +391,7 @@ async function trade(command: Command, side: "buy" | "sell", tokenAddress: strin
   }
 
   // The contract takes the token amount on both sides of the trade.
-  const receipt = await executeTrade(handle, side, quote.tokenAmount, slippage);
+  const receipt = await executeTrade(handle, side, quote.tokenAmount, slippage, session.wallet as `0x${string}`);
 
   out.result(
     {

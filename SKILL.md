@@ -52,7 +52,8 @@ Two interchangeable credentials — the same pair every AIP SDK uses:
 | `UNIBASE_PROXY_AUTH` (JWT) | `bitagent configure` → browser approval | Terminal agent, `agent mine`, `job list` |
 | `UNIBASE_WALLET_PRIVATE_KEY` | the human supplies it | anything that signs a transaction: `token launch/buy/sell` |
 
-The JWT wins when both are set. Resolution order is environment →
+The JWT wins for API calls when both are set; signing commands (`token launch/buy/sell`)
+use the private key regardless. Resolution order for each is environment →
 `~/.config/bitagent/config.json` → `~/.config/unibase-aip-sdk/config.json`, so a machine
 that already authorized a Python / Go / TypeScript AIP SDK needs no setup here.
 
@@ -228,7 +229,8 @@ returns `{token, agentHash, transactionHash, url, network, chainId}`.
 
 Reserve tokens: `UB`, `USD1`, `WBNB` on BSC; `UB`, `USDC`, `WETH` on Base and Base
 Sepolia; `UB` on X Layer Testnet (`bitagent networks --json` lists them). `--slippage` is in hundredths of a percent
-(`50` = 0.5%) — the same scale the contract uses, where `amount * rate / 10000`. Always
+(`50` = 0.5%), a whole number; the trade summary shows the slippage applied (a few values
+move by at most 0.04%). Trades approve exactly what they spend. Always
 run `token quote` and show the human the numbers before a trade.
 
 `token info` returns `{token, name, symbol, creator, currentSupply, maxSupply, progress,

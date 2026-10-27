@@ -75,9 +75,10 @@ export function isTokenExpired(token: string): boolean {
 }
 
 /**
- * Resolve credentials: environment first, then the CLI config, then the AIP
- * SDK config. Never prompts — commands that need a credential call
- * `requireCredentials()`.
+ * Resolve the credential for API calls: a JWT wherever it comes from (env,
+ * then CLI config, then AIP SDK config), else a private key. Never prompts —
+ * commands that need a credential call `requireCredentials()`; signing goes
+ * through `requireAccount()`, which takes a key even when a JWT is found.
  */
 export function resolveCredentials(): Credentials {
   const envToken = process.env.UNIBASE_PROXY_AUTH?.trim();
@@ -91,17 +92,21 @@ export function resolveCredentials(): Credentials {
   const sdkToken = sdkCredential("UNIBASE_PROXY_AUTH");
   if (sdkToken) return jwtCredentials(sdkToken, "aip-sdk config UNIBASE_PROXY_AUTH");
 
+  return resolveKey() ?? { mode: "none", token: "", privateKey: "", wallet: "", source: "" };
+}
+
+/** The private key: environment first, then the CLI config, then the AIP SDK config. */
+function resolveKey(): Credentials | undefined {
   const envKey = process.env.UNIBASE_WALLET_PRIVATE_KEY?.trim() || process.env.PRIVATE_KEY?.trim();
   if (envKey) return keyCredentials(envKey, "env UNIBASE_WALLET_PRIVATE_KEY");
 
-  if (config.UNIBASE_WALLET_PRIVATE_KEY) {
-    return keyCredentials(config.UNIBASE_WALLET_PRIVATE_KEY, "config UNIBASE_WALLET_PRIVATE_KEY");
-  }
+  const configKey = loadConfig().UNIBASE_WALLET_PRIVATE_KEY;
+  if (configKey) return keyCredentials(configKey, "config UNIBASE_WALLET_PRIVATE_KEY");
 
   const sdkKey = sdkCredential("UNIBASE_WALLET_PRIVATE_KEY");
   if (sdkKey) return keyCredentials(sdkKey, "aip-sdk config UNIBASE_WALLET_PRIVATE_KEY");
 
-  return { mode: "none", token: "", privateKey: "", wallet: "", source: "" };
+  return undefined;
 }
 
 function jwtCredentials(token: string, source: string): Credentials {
@@ -137,9 +142,13 @@ export function requireCredentials(): Credentials {
 }
 
 /** For on-chain work: only the private-key mode can sign transactions. */
+/**
+ * The signing account. Looks for a private key on its own: a JWT, which wins
+ * for API calls, must not hide a key the user set for signing.
+ */
 export function requireAccount(): PrivateKeyAccount {
-  const credentials = requireCredentials();
-  if (credentials.mode !== "key") {
+  const credentials = resolveKey();
+  if (!credentials) {
     throw new CliError(
       "This command signs on-chain transactions and needs a wallet private key.",
       "Run `bitagent configure` and choose the private-key method, or set UNIBASE_WALLET_PRIVATE_KEY.",
