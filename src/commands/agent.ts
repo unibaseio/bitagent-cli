@@ -2,10 +2,13 @@
 
 import { spawn } from "node:child_process";
 import type { Command } from "commander";
+import { recoverTypedDataAddress } from "viem";
 import { AipClient, type Agent } from "../lib/api/aip.js";
 import { GatewayClient, type GatewayJob } from "../lib/api/gateway.js";
-import { resolveContext, type Ctx } from "../lib/context.js";
-import { CliError } from "../lib/errors.js";
+import { bawAddress, bawSignTypedData, requireDevMode } from "../lib/baw.js";
+import { buildContext, resolveContext, resolveNetworkOption, type Ctx, type GlobalOptions } from "../lib/context.js";
+import { ApiError, CliError } from "../lib/errors.js";
+import { confirm } from "../lib/prompt.js";
 import { loadConfig, updateConfig } from "../lib/config.js";
 import {
   REGISTER_MESSAGE,
@@ -170,6 +173,129 @@ export function registerAgentCommands(program: Command): void {
           ["endpoint", config.endpointUrl || "gateway polling"],
           ["price", `${config.costModel?.baseCallFee} ${config.currency}`],
           ["offerings", (config.jobOfferings ?? []).length],
+        ]);
+        out.hint("Start taking work with `bitagent agent serve --exec \"<your command>\"`.");
+      });
+    });
+
+  agent
+    .command("activate")
+    .description("Activate your Binance Agent ID (alice.ai) as an AIP agent — signed with baw, no gas")
+    .option("--name <name>", "Display name (defaults to your .ai name)")
+    .option("--description <text>", "What the agent does", "")
+    .option("--url <url>", "Public A2A endpoint. Omit for gateway-polling (private) agents")
+    .option("--price <amount>", "Base call fee, in USD", "0.001")
+    .option("--currency <code>", "Price currency", "USD")
+    .option(
+      "--skill <name:description...>",
+      "Repeatable. A capability listed on the agent card",
+      collect,
+      [],
+    )
+    .option("--tag <tag...>", "Repeatable. Capability tags used for discovery", collect, [])
+    .option(
+      "--offering <name:price[:description]...>",
+      "Repeatable. A hireable job offering",
+      collect,
+      [],
+    )
+    .option("--metadata <json>", "Extra metadata object, as JSON")
+    .option("--timeout <seconds>", "How long to wait for the approval in the Binance App", "300")
+    .option("-y, --yes", "Sign without asking for confirmation")
+    .action(async function (this: Command) {
+      // Agent IDs live on BNB Chain mainnet, whatever the default network is.
+      const globals = this.optsWithGlobals<GlobalOptions>();
+      if (globals.network && resolveNetworkOption(globals.network).chainId !== 56) {
+        throw new CliError("Binance Agent IDs live on BNB Chain mainnet.", "Drop --network, or use --network bsc.");
+      }
+      out.setJsonMode(Boolean(globals.json));
+      const ctx = buildContext({ ...globals, network: "bsc" });
+      const options = this.opts<{
+        name?: string;
+        description: string;
+        url?: string;
+        price: string;
+        currency: string;
+        skill: string[];
+        tag: string[];
+        offering: string[];
+        metadata?: string;
+        timeout: string;
+        yes?: boolean;
+      }>();
+
+      const wallet = await bawAddress();
+      await requireDevMode();
+
+      const aip = AipClient.from(ctx);
+      const challenge = await aip.agentIdChallenge(wallet).catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) {
+          throw new CliError(
+            `${wallet} holds no Binance Agent ID.`,
+            "Claim one in the Binance App (Wallet → Agentic Wallet → Agent ID). Just claimed it? It takes a minute to land on-chain.",
+          );
+        }
+        throw e;
+      });
+
+      const config = buildAgentConfig(ctx, {
+        ...options,
+        name: options.name ?? challenge.agent_id,
+        handle: challenge.agent_id,
+      });
+      const payload = toRegistrationMap(config);
+      // The platform derives the handle and chain from the Agent ID itself.
+      delete payload.handle;
+      delete payload.chain_id;
+
+      out.heading(`Activate ${challenge.agent_id}`);
+      out.kv([
+        ["agentic wallet", wallet],
+        ["agent id", challenge.agent_id],
+        ["chain", "BNB Chain (56)"],
+        ["challenge expires", new Date(challenge.expires_at * 1000).toLocaleTimeString()],
+      ]);
+      if (!options.yes) {
+        if (!process.stdin.isTTY) {
+          throw new CliError("Confirmation needed.", "Run it again with --yes to sign without a prompt.");
+        }
+        if (!(await confirm(`Sign the activation of ${challenge.agent_id} with your Agentic Wallet?`, true))) {
+          throw new CliError("Cancelled — nothing was signed.");
+        }
+      }
+
+      out.step("Signing with baw …");
+      const signature = await bawSignTypedData(wallet, challenge.typed_data, {
+        timeoutMs: Number(options.timeout) * 1000,
+        onPending: () => out.info(`  ${out.pc.yellow("→")} Approve the signature request in the Binance App …`),
+      });
+      // A malformed signature fails here with a clear message, not as a 401.
+      const signer = await recoverTypedDataAddress({
+        ...challenge.typed_data,
+        signature,
+      } as Parameters<typeof recoverTypedDataAddress>[0]);
+      if (signer.toLowerCase() !== wallet.toLowerCase()) {
+        throw new CliError(`baw returned a signature from ${signer}, not from ${wallet}.`);
+      }
+
+      out.step(`Activating ${challenge.agent_id} on ${ctx.aip} …`);
+      const response = await aip.activateAgentId({ ...payload, nonce: challenge.nonce, signature });
+      const agentId = String(response.agent_id ?? "");
+      if (agentId) {
+        updateConfig((saved) => {
+          saved.agentId = agentId;
+          saved.agentWallet = wallet;
+        });
+      }
+
+      out.result(response, () => {
+        out.success(`${response.status === "already_registered" ? "Already active" : "Activated"}: ${challenge.agent_id}`);
+        out.kv([
+          ["agent id", agentId || "(not returned)"],
+          ["handle", response.handle],
+          ["payout wallet", response.agent_wallet],
+          ["owner", wallet],
+          ["endpoint", config.endpointUrl || "gateway polling"],
         ]);
         out.hint("Start taking work with `bitagent agent serve --exec \"<your command>\"`.");
       });
