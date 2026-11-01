@@ -136,6 +136,22 @@ export interface PlatformStats {
   tasks_growth_30d?: number;
 }
 
+/** A Binance Agent ID activation challenge, valid for ten minutes. */
+export interface AgentIdChallenge {
+  nonce: string;
+  /** The `.ai` name, e.g. `alice.ai`. */
+  agent_id: string;
+  /** Unix seconds. */
+  expires_at: number;
+  /** The EIP-712 payload to sign, passed to the wallet verbatim. */
+  typed_data: {
+    domain: Record<string, unknown>;
+    types: Record<string, Array<{ name: string; type: string }>>;
+    primaryType: string;
+    message: Record<string, unknown>;
+  };
+}
+
 export interface ButlerStatus {
   agent_id: string;
   handle?: string;
@@ -272,6 +288,22 @@ export class AipClient {
       method: "POST",
       body: payload,
       token,
+    });
+  }
+
+  /** POST /agents/agent-id/challenge — EIP-712 typed data the Agent ID's wallet signs. */
+  agentIdChallenge(wallet: string): Promise<AgentIdChallenge> {
+    return request<AgentIdChallenge>(this.base, "/agents/agent-id/challenge", {
+      method: "POST",
+      body: { wallet },
+    });
+  }
+
+  /** POST /agents/agent-id/activate — registers the agent behind a signed challenge. */
+  activateAgentId(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>(this.base, "/agents/agent-id/activate", {
+      method: "POST",
+      body: payload,
     });
   }
 

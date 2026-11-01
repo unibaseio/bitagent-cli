@@ -3698,390 +3698,6 @@ var require_commander = __commonJS({
   }
 });
 
-// src/lib/errors.ts
-var CliError, ApiError, isCliError;
-var init_errors = __esm({
-  "src/lib/errors.ts"() {
-    "use strict";
-    CliError = class extends Error {
-      constructor(message, hint2, exitCode = 1) {
-        super(message);
-        this.hint = hint2;
-        this.exitCode = exitCode;
-        this.name = "CliError";
-      }
-    };
-    ApiError = class extends CliError {
-      constructor(status, detail, url4, hint2) {
-        super(`HTTP ${status} from ${url4}: ${detail}`, hint2);
-        this.status = status;
-        this.detail = detail;
-        this.url = url4;
-        this.name = "ApiError";
-      }
-    };
-    isCliError = (e) => e instanceof CliError;
-  }
-});
-
-// src/lib/http.ts
-function buildUrl(base4, path3, query) {
-  const url4 = new URL(base4.replace(/\/+$/, "") + (path3.startsWith("/") ? path3 : `/${path3}`));
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === void 0 || value === null || value === "") continue;
-    url4.searchParams.set(key, String(value));
-  }
-  return url4.toString();
-}
-function authHeaders(token) {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-async function request(base4, path3, options = {}) {
-  const url4 = buildUrl(base4, path3, options.query);
-  const method = options.method ?? "GET";
-  const headers = {
-    Accept: "application/json",
-    ...authHeaders(options.token),
-    ...options.headers
-  };
-  if (options.body !== void 0) headers["Content-Type"] = "application/json";
-  let response;
-  try {
-    response = await fetch(url4, {
-      method,
-      headers,
-      body: options.body === void 0 ? void 0 : JSON.stringify(options.body),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 6e4)
-    });
-  } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e);
-    throw new CliError(
-      `Cannot reach ${url4}: ${reason}`,
-      "Check your connection, or override the endpoint with --aip-endpoint / --bitagent-api."
-    );
-  }
-  const text = await response.text().catch(() => "");
-  if (!response.ok) {
-    if (options.allowStatus?.includes(response.status)) return void 0;
-    throw new ApiError(response.status, extractDetail(text) || response.statusText, url4);
-  }
-  if (!text) return void 0;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new CliError(`Unexpected non-JSON response from ${url4}: ${text.slice(0, 200)}`);
-  }
-}
-async function* streamSse(base4, path3, options = {}) {
-  const url4 = buildUrl(base4, path3, options.query);
-  const response = await fetch(url4, {
-    method: options.method ?? "POST",
-    headers: {
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-      ...authHeaders(options.token),
-      ...options.headers
-    },
-    body: options.body === void 0 ? void 0 : JSON.stringify(options.body),
-    signal: AbortSignal.timeout(options.timeoutMs ?? 6e5)
-  }).catch((e) => {
-    throw new CliError(`Cannot reach ${url4}: ${e instanceof Error ? e.message : String(e)}`);
-  });
-  if (!response.ok || !response.body) {
-    const text = await response.text().catch(() => "");
-    throw new ApiError(response.status, extractDetail(text) || response.statusText, url4);
-  }
-  const reader = response.body.getReader();
-  const decoder2 = new TextDecoder();
-  let buffer2 = "";
-  for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer2 += decoder2.decode(value, { stream: true });
-    const lines = buffer2.split("\n");
-    buffer2 = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const raw = line.slice(5).trim();
-      if (!raw || raw === "[DONE]") continue;
-      try {
-        yield JSON.parse(raw);
-      } catch {
-        yield { raw };
-      }
-    }
-  }
-}
-function extractDetail(text) {
-  if (!text) return "";
-  try {
-    const body = JSON.parse(text);
-    if (typeof body === "string") return body;
-    if (body && typeof body === "object") {
-      const record2 = body;
-      const detail = record2.detail ?? record2.message ?? record2.error;
-      if (typeof detail === "string") return detail;
-      if (Array.isArray(detail)) {
-        return detail.map((item) => {
-          const entry = item;
-          const field = (entry.loc ?? []).slice(1).join(".") || "body";
-          return entry.msg ? `${field}: ${entry.msg}` : JSON.stringify(item);
-        }).join("; ");
-      }
-      if (detail) return JSON.stringify(detail);
-    }
-  } catch {
-  }
-  return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-}
-var init_http = __esm({
-  "src/lib/http.ts"() {
-    "use strict";
-    init_errors();
-  }
-});
-
-// src/lib/api/aip.ts
-var AipClient;
-var init_aip = __esm({
-  "src/lib/api/aip.ts"() {
-    "use strict";
-    init_http();
-    AipClient = class _AipClient {
-      constructor(base4, chainId) {
-        this.base = base4;
-        this.chainId = chainId;
-      }
-      static from(ctx) {
-        return new _AipClient(ctx.aip, ctx.net.chainId);
-      }
-      get(path3, query, token) {
-        return request(this.base, path3, { query: { chain_id: this.chainId, ...query }, token });
-      }
-      post(path3, body, query, token) {
-        return request(this.base, path3, {
-          method: "POST",
-          body: body ?? {},
-          query: { chain_id: this.chainId, ...query },
-          token
-        });
-      }
-      // ------------------------------------------------------------ discovery
-      listAgents(query = {}) {
-        return this.get("/agents", { page: 1, pageSize: 50, ...query });
-      }
-      getAgent(agentId) {
-        return this.get(`/agents/${encodeURIComponent(agentId)}`);
-      }
-      getAgentByHandle(handle) {
-        return this.get(`/agents/handle/${encodeURIComponent(handle)}`);
-      }
-      listServices(query = {}) {
-        return this.get("/services", { page: 1, pageSize: 50, ...query });
-      }
-      getService(serviceId) {
-        return this.get(`/services/${encodeURIComponent(serviceId)}`);
-      }
-      listTasks(query = {}) {
-        return this.get("/tasks", { limit: 20, offset: 0, ...query });
-      }
-      getTask(taskId) {
-        return this.get(`/tasks/${encodeURIComponent(taskId)}`);
-      }
-      /**
-       * Leaderboard for this network, ranked server-side. `metric` is revenue,
-       * success_rate or calls; "tasks" (the pre-0.2.1 name) means calls.
-       */
-      async rankings(query = {}) {
-        const metric = query.metric === "tasks" ? "calls" : query.metric ?? "revenue";
-        const limit = query.limit ?? 10;
-        const page = await this.get("/agents/ranking", {
-          sort_by: metric,
-          page: 1,
-          pageSize: limit,
-          registered_onchain: true
-        });
-        return (page.data ?? []).slice(0, limit).map((agent, i) => ({
-          rank: i + 1,
-          agent_id: agent.agent_id,
-          handle: agent.handle,
-          name: agent.display_name,
-          score: metric === "success_rate" ? agent.stats?.success_rate : metric === "calls" ? agent.stats?.total_jobs : agent.stats?.total_revenue,
-          metric,
-          stats: agent.stats
-        }));
-      }
-      stats() {
-        return this.get("/stats/summary");
-      }
-      // ------------------------------------------------------------ my account
-      myAgents(token) {
-        return this.get("/my-agents", {}, token);
-      }
-      myJobs(token, role = "any") {
-        return this.get("/my-jobs", { role }, token);
-      }
-      // ------------------------------------------------------------ registration
-      /** POST /agents/register — accepts a bearer token or an EIP-191 signature. */
-      registerAgent(payload, token) {
-        return request(this.base, "/agents/register", {
-          method: "POST",
-          body: payload,
-          token
-        });
-      }
-      // ------------------------------------------------------------ butler
-      async butlerStatus(token, wallet) {
-        return await request(this.base, "/butler", {
-          query: { chain_id: this.chainId, wallet_address: wallet },
-          token,
-          allowStatus: [404]
-        });
-      }
-      activateButler(body, token) {
-        return request(this.base, "/butler/activate", { method: "POST", body, token });
-      }
-      butlerStats(token) {
-        return this.get("/butler/stats", {}, token);
-      }
-      // ------------------------------------------------------------ invoke
-      invoke(agentId, body, token) {
-        const path3 = agentId ? `/invoke/${encodeURIComponent(agentId)}` : "/invoke";
-        return request(this.base, path3, {
-          method: "POST",
-          body,
-          token,
-          timeoutMs: 6e5
-        });
-      }
-      invokeStream(agentId, body, token) {
-        const path3 = agentId ? `/invoke/${encodeURIComponent(agentId)}/stream` : "/invoke/stream";
-        return streamSse(this.base, path3, { method: "POST", body, token });
-      }
-      conversations(token) {
-        return this.get("/conversations", {}, token);
-      }
-      conversationHistory(conversationId, token) {
-        return this.get(`/conversations/${encodeURIComponent(conversationId)}/history`, {}, token);
-      }
-      // ------------------------------------------------------------ jobs (8183)
-      createJob(clientId, body, token) {
-        return request(this.base, "/v1/jobs", {
-          method: "POST",
-          body: { expires_in: 86400, metadata: {}, ...body },
-          query: { client_id: clientId, chain_id: this.chainId },
-          token
-        });
-      }
-      getJob(jobId2, token) {
-        return this.get(`/v1/jobs/${encodeURIComponent(jobId2)}`, {}, token);
-      }
-      acceptJob(jobId2, providerId, token) {
-        return this.post(
-          `/v1/jobs/${encodeURIComponent(jobId2)}/accept`,
-          void 0,
-          { provider_id: providerId },
-          token
-        );
-      }
-      submitJob(jobId2, body, token) {
-        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/submit`, body, {}, token);
-      }
-      completeJob(jobId2, body, token) {
-        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/complete`, body, {}, token);
-      }
-      rejectJob(jobId2, rejectorId, reason, token) {
-        return this.post(
-          `/v1/jobs/${encodeURIComponent(jobId2)}/reject`,
-          { reason },
-          { rejector_id: rejectorId },
-          token
-        );
-      }
-    };
-  }
-});
-
-// src/lib/config.ts
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-function configDir() {
-  const override = process.env.BITAGENT_CONFIG_DIR;
-  if (override) return path.resolve(override);
-  return path.join(os.homedir(), ".config", "bitagent");
-}
-function configFile() {
-  return path.join(configDir(), "config.json");
-}
-function sdkConfigFile() {
-  return path.join(os.homedir(), ".config", "unibase-aip-sdk", "config.json");
-}
-function readJson(file2) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file2, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-function loadConfig() {
-  return readJson(configFile());
-}
-function saveConfig(config2) {
-  const file2 = configFile();
-  fs.mkdirSync(path.dirname(file2), { recursive: true });
-  fs.writeFileSync(file2, JSON.stringify(config2, null, 2) + "\n", { mode: 384 });
-  fs.chmodSync(file2, 384);
-}
-function updateConfig(mutate) {
-  const config2 = loadConfig();
-  mutate(config2);
-  saveConfig(config2);
-  return config2;
-}
-function sdkCredential(key) {
-  const value = readJson(sdkConfigFile())[key];
-  return typeof value === "string" ? value : "";
-}
-function getSession(chainId) {
-  const session = loadConfig().sessions?.[String(chainId)];
-  if (!session?.token) return void 0;
-  if (session.expiresAt && session.expiresAt < Date.now() + 6e4) return void 0;
-  return session;
-}
-function setSession(chainId, session) {
-  updateConfig((config2) => {
-    config2.sessions ??= {};
-    config2.sessions[String(chainId)] = session;
-  });
-}
-function clearSessions() {
-  updateConfig((config2) => {
-    delete config2.sessions;
-  });
-}
-function setButler(chainId, agentId) {
-  updateConfig((config2) => {
-    config2.butler ??= {};
-    config2.butler[String(chainId)] = agentId;
-  });
-}
-function getConversation(chainId) {
-  return loadConfig().conversation?.[String(chainId)];
-}
-function setConversation(chainId, conversationId) {
-  updateConfig((config2) => {
-    config2.conversation ??= {};
-    config2.conversation[String(chainId)] = conversationId;
-  });
-}
-var init_config = __esm({
-  "src/lib/config.ts"() {
-    "use strict";
-  }
-});
-
 // node_modules/viem/node_modules/abitype/dist/esm/version.js
 var version;
 var init_version = __esm({
@@ -4092,7 +3708,7 @@ var init_version = __esm({
 
 // node_modules/viem/node_modules/abitype/dist/esm/errors.js
 var BaseError;
-var init_errors2 = __esm({
+var init_errors = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/errors.js"() {
     init_version();
     BaseError = class _BaseError extends Error {
@@ -4298,7 +3914,7 @@ var init_signatures = __esm({
 var UnknownTypeError, UnknownSolidityTypeError;
 var init_abiItem = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/human-readable/errors/abiItem.js"() {
-    init_errors2();
+    init_errors();
     UnknownTypeError = class extends BaseError {
       constructor({ type: type3 }) {
         super("Unknown type.", {
@@ -4334,7 +3950,7 @@ var init_abiItem = __esm({
 var InvalidParameterError, SolidityProtectedKeywordError, InvalidModifierError, InvalidFunctionModifierError, InvalidAbiTypeParameterError;
 var init_abiParameter = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/human-readable/errors/abiParameter.js"() {
-    init_errors2();
+    init_errors();
     InvalidParameterError = class extends BaseError {
       constructor({ param }) {
         super("Invalid ABI parameter.", {
@@ -4418,7 +4034,7 @@ var init_abiParameter = __esm({
 var InvalidSignatureError, UnknownSignatureError, InvalidStructSignatureError;
 var init_signature = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/human-readable/errors/signature.js"() {
-    init_errors2();
+    init_errors();
     InvalidSignatureError = class extends BaseError {
       constructor({ signature, type: type3 }) {
         super(`Invalid ${type3} signature.`, {
@@ -4466,7 +4082,7 @@ var init_signature = __esm({
 var CircularReferenceError;
 var init_struct = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/human-readable/errors/struct.js"() {
-    init_errors2();
+    init_errors();
     CircularReferenceError = class extends BaseError {
       constructor({ type: type3 }) {
         super("Circular reference detected.", {
@@ -4487,7 +4103,7 @@ var init_struct = __esm({
 var InvalidParenthesisError;
 var init_splitParameters = __esm({
   "node_modules/viem/node_modules/abitype/dist/esm/human-readable/errors/splitParameters.js"() {
-    init_errors2();
+    init_errors();
     InvalidParenthesisError = class extends BaseError {
       constructor({ current, depth }) {
         super("Unbalanced parentheses.", {
@@ -13715,7 +13331,7 @@ var init_version3 = __esm({
 function getVersion() {
   return version3;
 }
-var init_errors3 = __esm({
+var init_errors2 = __esm({
   "node_modules/ox/_esm/core/internal/errors.js"() {
     init_version3();
   }
@@ -13732,7 +13348,7 @@ function walk2(err2, fn) {
 var BaseError3;
 var init_Errors = __esm({
   "node_modules/ox/_esm/core/Errors.js"() {
-    init_errors3();
+    init_errors2();
     BaseError3 = class _BaseError extends Error {
       static setStaticOptions(options) {
         _BaseError.prototype.docsOrigin = options.docsOrigin;
@@ -17154,7 +16770,7 @@ function isNullUniversalResolverError(err2) {
     return true;
   return false;
 }
-var init_errors4 = __esm({
+var init_errors3 = __esm({
   "node_modules/viem/_esm/utils/ens/errors.js"() {
     init_base();
     init_contract();
@@ -17342,7 +16958,7 @@ var init_getEnsAddress = __esm({
     init_size();
     init_trim();
     init_toHex();
-    init_errors4();
+    init_errors3();
     init_localBatchGatewayRequest();
     init_namehash();
     init_packetToBytes();
@@ -17661,7 +17277,7 @@ var init_getEnsText = __esm({
     init_encodeFunctionData();
     init_getChainContractAddress();
     init_toHex();
-    init_errors4();
+    init_errors3();
     init_localBatchGatewayRequest();
     init_namehash();
     init_packetToBytes();
@@ -17739,7 +17355,7 @@ var init_getEnsName = __esm({
   "node_modules/viem/_esm/actions/ens/getEnsName.js"() {
     init_abis();
     init_getChainContractAddress();
-    init_errors4();
+    init_errors3();
     init_localBatchGatewayRequest();
     init_getAction();
     init_readContract();
@@ -19035,7 +18651,7 @@ function parseUrl(url_) {
   }
 }
 var defaultMaxResponseBodySize;
-var init_http2 = __esm({
+var init_http = __esm({
   "node_modules/viem/_esm/utils/rpc/http.js"() {
     init_request();
     init_utils3();
@@ -19349,7 +18965,7 @@ var init_version4 = __esm({
 
 // node_modules/abitype/dist/esm/errors.js
 var BaseError4;
-var init_errors5 = __esm({
+var init_errors4 = __esm({
   "node_modules/abitype/dist/esm/errors.js"() {
     init_version4();
     BaseError4 = class _BaseError extends Error {
@@ -19561,7 +19177,7 @@ var init_signatures2 = __esm({
 var InvalidAbiItemError, UnknownTypeError2, UnknownSolidityTypeError2;
 var init_abiItem2 = __esm({
   "node_modules/abitype/dist/esm/human-readable/errors/abiItem.js"() {
-    init_errors5();
+    init_errors4();
     InvalidAbiItemError = class extends BaseError4 {
       constructor({ signature }) {
         super("Failed to parse ABI item.", {
@@ -19611,7 +19227,7 @@ var init_abiItem2 = __esm({
 var InvalidAbiParametersError, InvalidParameterError2, SolidityProtectedKeywordError2, InvalidModifierError2, InvalidFunctionModifierError2, InvalidAbiTypeParameterError2;
 var init_abiParameter2 = __esm({
   "node_modules/abitype/dist/esm/human-readable/errors/abiParameter.js"() {
-    init_errors5();
+    init_errors4();
     InvalidAbiParametersError = class extends BaseError4 {
       constructor({ params }) {
         super("Failed to parse ABI parameters.", {
@@ -19709,7 +19325,7 @@ var init_abiParameter2 = __esm({
 var InvalidSignatureError2, UnknownSignatureError2, InvalidStructSignatureError2;
 var init_signature2 = __esm({
   "node_modules/abitype/dist/esm/human-readable/errors/signature.js"() {
-    init_errors5();
+    init_errors4();
     InvalidSignatureError2 = class extends BaseError4 {
       constructor({ signature, type: type3 }) {
         super(`Invalid ${type3} signature.`, {
@@ -19757,7 +19373,7 @@ var init_signature2 = __esm({
 var CircularReferenceError2;
 var init_struct2 = __esm({
   "node_modules/abitype/dist/esm/human-readable/errors/struct.js"() {
-    init_errors5();
+    init_errors4();
     CircularReferenceError2 = class extends BaseError4 {
       constructor({ type: type3 }) {
         super("Circular reference detected.", {
@@ -19778,7 +19394,7 @@ var init_struct2 = __esm({
 var InvalidParenthesisError2;
 var init_splitParameters2 = __esm({
   "node_modules/abitype/dist/esm/human-readable/errors/splitParameters.js"() {
-    init_errors5();
+    init_errors4();
     InvalidParenthesisError2 = class extends BaseError4 {
       constructor({ current, depth }) {
         super("Unbalanced parentheses.", {
@@ -24578,6 +24194,26 @@ var init_erc8010 = __esm({
   }
 });
 
+// node_modules/viem/_esm/utils/signature/recoverTypedDataAddress.js
+async function recoverTypedDataAddress(parameters) {
+  const { domain: domain2, message, primaryType, signature, types: types3 } = parameters;
+  return recoverAddress({
+    hash: hashTypedData({
+      domain: domain2,
+      message,
+      primaryType,
+      types: types3
+    }),
+    signature
+  });
+}
+var init_recoverTypedDataAddress = __esm({
+  "node_modules/viem/_esm/utils/signature/recoverTypedDataAddress.js"() {
+    init_hashTypedData();
+    init_recoverAddress();
+  }
+});
+
 // node_modules/viem/_esm/utils/unit/formatUnits.js
 function formatUnits(value, decimals) {
   return format(value, decimals);
@@ -28325,12 +27961,12 @@ function http(url4, config2 = {}) {
   };
 }
 var signalId, signalIds;
-var init_http3 = __esm({
+var init_http2 = __esm({
   "node_modules/viem/_esm/clients/transports/http.js"() {
     init_request();
     init_transport();
     init_createBatchScheduler();
-    init_http2();
+    init_http();
     init_createTransport();
     signalId = 0;
     signalIds = /* @__PURE__ */ new WeakMap();
@@ -28345,7 +27981,7 @@ var init_esm = __esm({
     init_public();
     init_custom();
     init_fallback();
-    init_http3();
+    init_http2();
     init_abis();
     init_number();
     init_getAddress();
@@ -28354,10 +27990,409 @@ var init_esm = __esm({
     init_toBytes();
     init_toHex();
     init_keccak256();
+    init_recoverTypedDataAddress();
     init_formatEther();
     init_formatUnits();
     init_parseEther();
     init_parseUnits();
+  }
+});
+
+// src/lib/errors.ts
+var CliError, ApiError, isCliError;
+var init_errors5 = __esm({
+  "src/lib/errors.ts"() {
+    "use strict";
+    CliError = class extends Error {
+      constructor(message, hint2, exitCode = 1) {
+        super(message);
+        this.hint = hint2;
+        this.exitCode = exitCode;
+        this.name = "CliError";
+      }
+    };
+    ApiError = class extends CliError {
+      constructor(status, detail, url4, hint2) {
+        super(`HTTP ${status} from ${url4}: ${detail}`, hint2);
+        this.status = status;
+        this.detail = detail;
+        this.url = url4;
+        this.name = "ApiError";
+      }
+    };
+    isCliError = (e) => e instanceof CliError;
+  }
+});
+
+// src/lib/http.ts
+function buildUrl(base4, path3, query) {
+  const url4 = new URL(base4.replace(/\/+$/, "") + (path3.startsWith("/") ? path3 : `/${path3}`));
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value === void 0 || value === null || value === "") continue;
+    url4.searchParams.set(key, String(value));
+  }
+  return url4.toString();
+}
+function authHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+async function request(base4, path3, options = {}) {
+  const url4 = buildUrl(base4, path3, options.query);
+  const method = options.method ?? "GET";
+  const headers = {
+    Accept: "application/json",
+    ...authHeaders(options.token),
+    ...options.headers
+  };
+  if (options.body !== void 0) headers["Content-Type"] = "application/json";
+  let response;
+  try {
+    response = await fetch(url4, {
+      method,
+      headers,
+      body: options.body === void 0 ? void 0 : JSON.stringify(options.body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 6e4)
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new CliError(
+      `Cannot reach ${url4}: ${reason}`,
+      "Check your connection, or override the endpoint with --aip-endpoint / --bitagent-api."
+    );
+  }
+  const text = await response.text().catch(() => "");
+  if (!response.ok) {
+    if (options.allowStatus?.includes(response.status)) return void 0;
+    throw new ApiError(response.status, extractDetail(text) || response.statusText, url4);
+  }
+  if (!text) return void 0;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new CliError(`Unexpected non-JSON response from ${url4}: ${text.slice(0, 200)}`);
+  }
+}
+async function* streamSse(base4, path3, options = {}) {
+  const url4 = buildUrl(base4, path3, options.query);
+  const response = await fetch(url4, {
+    method: options.method ?? "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      ...authHeaders(options.token),
+      ...options.headers
+    },
+    body: options.body === void 0 ? void 0 : JSON.stringify(options.body),
+    signal: AbortSignal.timeout(options.timeoutMs ?? 6e5)
+  }).catch((e) => {
+    throw new CliError(`Cannot reach ${url4}: ${e instanceof Error ? e.message : String(e)}`);
+  });
+  if (!response.ok || !response.body) {
+    const text = await response.text().catch(() => "");
+    throw new ApiError(response.status, extractDetail(text) || response.statusText, url4);
+  }
+  const reader = response.body.getReader();
+  const decoder2 = new TextDecoder();
+  let buffer2 = "";
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer2 += decoder2.decode(value, { stream: true });
+    const lines = buffer2.split("\n");
+    buffer2 = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if (!raw || raw === "[DONE]") continue;
+      try {
+        yield JSON.parse(raw);
+      } catch {
+        yield { raw };
+      }
+    }
+  }
+}
+function extractDetail(text) {
+  if (!text) return "";
+  try {
+    const body = JSON.parse(text);
+    if (typeof body === "string") return body;
+    if (body && typeof body === "object") {
+      const record2 = body;
+      const detail = record2.detail ?? record2.message ?? record2.error;
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail.map((item) => {
+          const entry = item;
+          const field = (entry.loc ?? []).slice(1).join(".") || "body";
+          return entry.msg ? `${field}: ${entry.msg}` : JSON.stringify(item);
+        }).join("; ");
+      }
+      if (detail) return JSON.stringify(detail);
+    }
+  } catch {
+  }
+  return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+}
+var init_http3 = __esm({
+  "src/lib/http.ts"() {
+    "use strict";
+    init_errors5();
+  }
+});
+
+// src/lib/api/aip.ts
+var AipClient;
+var init_aip = __esm({
+  "src/lib/api/aip.ts"() {
+    "use strict";
+    init_http3();
+    AipClient = class _AipClient {
+      constructor(base4, chainId) {
+        this.base = base4;
+        this.chainId = chainId;
+      }
+      static from(ctx) {
+        return new _AipClient(ctx.aip, ctx.net.chainId);
+      }
+      get(path3, query, token) {
+        return request(this.base, path3, { query: { chain_id: this.chainId, ...query }, token });
+      }
+      post(path3, body, query, token) {
+        return request(this.base, path3, {
+          method: "POST",
+          body: body ?? {},
+          query: { chain_id: this.chainId, ...query },
+          token
+        });
+      }
+      // ------------------------------------------------------------ discovery
+      listAgents(query = {}) {
+        return this.get("/agents", { page: 1, pageSize: 50, ...query });
+      }
+      getAgent(agentId) {
+        return this.get(`/agents/${encodeURIComponent(agentId)}`);
+      }
+      getAgentByHandle(handle) {
+        return this.get(`/agents/handle/${encodeURIComponent(handle)}`);
+      }
+      listServices(query = {}) {
+        return this.get("/services", { page: 1, pageSize: 50, ...query });
+      }
+      getService(serviceId) {
+        return this.get(`/services/${encodeURIComponent(serviceId)}`);
+      }
+      listTasks(query = {}) {
+        return this.get("/tasks", { limit: 20, offset: 0, ...query });
+      }
+      getTask(taskId) {
+        return this.get(`/tasks/${encodeURIComponent(taskId)}`);
+      }
+      /**
+       * Leaderboard for this network, ranked server-side. `metric` is revenue,
+       * success_rate or calls; "tasks" (the pre-0.2.1 name) means calls.
+       */
+      async rankings(query = {}) {
+        const metric = query.metric === "tasks" ? "calls" : query.metric ?? "revenue";
+        const limit = query.limit ?? 10;
+        const page = await this.get("/agents/ranking", {
+          sort_by: metric,
+          page: 1,
+          pageSize: limit,
+          registered_onchain: true
+        });
+        return (page.data ?? []).slice(0, limit).map((agent, i) => ({
+          rank: i + 1,
+          agent_id: agent.agent_id,
+          handle: agent.handle,
+          name: agent.display_name,
+          score: metric === "success_rate" ? agent.stats?.success_rate : metric === "calls" ? agent.stats?.total_jobs : agent.stats?.total_revenue,
+          metric,
+          stats: agent.stats
+        }));
+      }
+      stats() {
+        return this.get("/stats/summary");
+      }
+      // ------------------------------------------------------------ my account
+      myAgents(token) {
+        return this.get("/my-agents", {}, token);
+      }
+      myJobs(token, role = "any") {
+        return this.get("/my-jobs", { role }, token);
+      }
+      // ------------------------------------------------------------ registration
+      /** POST /agents/register — accepts a bearer token or an EIP-191 signature. */
+      registerAgent(payload, token) {
+        return request(this.base, "/agents/register", {
+          method: "POST",
+          body: payload,
+          token
+        });
+      }
+      /** POST /agents/agent-id/challenge — EIP-712 typed data the Agent ID's wallet signs. */
+      agentIdChallenge(wallet) {
+        return request(this.base, "/agents/agent-id/challenge", {
+          method: "POST",
+          body: { wallet }
+        });
+      }
+      /** POST /agents/agent-id/activate — registers the agent behind a signed challenge. */
+      activateAgentId(payload) {
+        return request(this.base, "/agents/agent-id/activate", {
+          method: "POST",
+          body: payload
+        });
+      }
+      // ------------------------------------------------------------ butler
+      async butlerStatus(token, wallet) {
+        return await request(this.base, "/butler", {
+          query: { chain_id: this.chainId, wallet_address: wallet },
+          token,
+          allowStatus: [404]
+        });
+      }
+      activateButler(body, token) {
+        return request(this.base, "/butler/activate", { method: "POST", body, token });
+      }
+      butlerStats(token) {
+        return this.get("/butler/stats", {}, token);
+      }
+      // ------------------------------------------------------------ invoke
+      invoke(agentId, body, token) {
+        const path3 = agentId ? `/invoke/${encodeURIComponent(agentId)}` : "/invoke";
+        return request(this.base, path3, {
+          method: "POST",
+          body,
+          token,
+          timeoutMs: 6e5
+        });
+      }
+      invokeStream(agentId, body, token) {
+        const path3 = agentId ? `/invoke/${encodeURIComponent(agentId)}/stream` : "/invoke/stream";
+        return streamSse(this.base, path3, { method: "POST", body, token });
+      }
+      conversations(token) {
+        return this.get("/conversations", {}, token);
+      }
+      conversationHistory(conversationId, token) {
+        return this.get(`/conversations/${encodeURIComponent(conversationId)}/history`, {}, token);
+      }
+      // ------------------------------------------------------------ jobs (8183)
+      createJob(clientId, body, token) {
+        return request(this.base, "/v1/jobs", {
+          method: "POST",
+          body: { expires_in: 86400, metadata: {}, ...body },
+          query: { client_id: clientId, chain_id: this.chainId },
+          token
+        });
+      }
+      getJob(jobId2, token) {
+        return this.get(`/v1/jobs/${encodeURIComponent(jobId2)}`, {}, token);
+      }
+      acceptJob(jobId2, providerId, token) {
+        return this.post(
+          `/v1/jobs/${encodeURIComponent(jobId2)}/accept`,
+          void 0,
+          { provider_id: providerId },
+          token
+        );
+      }
+      submitJob(jobId2, body, token) {
+        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/submit`, body, {}, token);
+      }
+      completeJob(jobId2, body, token) {
+        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/complete`, body, {}, token);
+      }
+      rejectJob(jobId2, rejectorId, reason, token) {
+        return this.post(
+          `/v1/jobs/${encodeURIComponent(jobId2)}/reject`,
+          { reason },
+          { rejector_id: rejectorId },
+          token
+        );
+      }
+    };
+  }
+});
+
+// src/lib/config.ts
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+function configDir() {
+  const override = process.env.BITAGENT_CONFIG_DIR;
+  if (override) return path.resolve(override);
+  return path.join(os.homedir(), ".config", "bitagent");
+}
+function configFile() {
+  return path.join(configDir(), "config.json");
+}
+function sdkConfigFile() {
+  return path.join(os.homedir(), ".config", "unibase-aip-sdk", "config.json");
+}
+function readJson(file2) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file2, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function loadConfig() {
+  return readJson(configFile());
+}
+function saveConfig(config2) {
+  const file2 = configFile();
+  fs.mkdirSync(path.dirname(file2), { recursive: true });
+  fs.writeFileSync(file2, JSON.stringify(config2, null, 2) + "\n", { mode: 384 });
+  fs.chmodSync(file2, 384);
+}
+function updateConfig(mutate) {
+  const config2 = loadConfig();
+  mutate(config2);
+  saveConfig(config2);
+  return config2;
+}
+function sdkCredential(key) {
+  const value = readJson(sdkConfigFile())[key];
+  return typeof value === "string" ? value : "";
+}
+function getSession(chainId) {
+  const session = loadConfig().sessions?.[String(chainId)];
+  if (!session?.token) return void 0;
+  if (session.expiresAt && session.expiresAt < Date.now() + 6e4) return void 0;
+  return session;
+}
+function setSession(chainId, session) {
+  updateConfig((config2) => {
+    config2.sessions ??= {};
+    config2.sessions[String(chainId)] = session;
+  });
+}
+function clearSessions() {
+  updateConfig((config2) => {
+    delete config2.sessions;
+  });
+}
+function setButler(chainId, agentId) {
+  updateConfig((config2) => {
+    config2.butler ??= {};
+    config2.butler[String(chainId)] = agentId;
+  });
+}
+function getConversation(chainId) {
+  return loadConfig().conversation?.[String(chainId)];
+}
+function setConversation(chainId, conversationId) {
+  updateConfig((config2) => {
+    config2.conversation ??= {};
+    config2.conversation[String(chainId)] = conversationId;
+  });
+}
+var init_config = __esm({
+  "src/lib/config.ts"() {
+    "use strict";
   }
 });
 
@@ -60050,7 +60085,7 @@ var init_chains2 = __esm({
     "use strict";
     init_esm();
     init_chains();
-    init_errors();
+    init_errors5();
     xLayerTestnet2 = defineChain({
       id: 1952,
       name: "X Layer Testnet",
@@ -99975,8 +100010,8 @@ var init_credentials = __esm({
     init_esm();
     init_accounts();
     import_siwe = __toESM(require_siwe(), 1);
-    init_errors();
-    init_http();
+    init_errors5();
+    init_http3();
     init_config();
     init_output();
     normalizeKey = (value) => {
@@ -168123,11 +168158,12 @@ var {
 import { createRequire } from "node:module";
 
 // src/commands/agent.ts
+init_esm();
 init_aip();
 import { spawn } from "node:child_process";
 
 // src/lib/api/gateway.ts
-init_http();
+init_http3();
 var GatewayClient = class _GatewayClient {
   constructor(base4) {
     this.base = base4;
@@ -168156,9 +168192,193 @@ var GatewayClient = class _GatewayClient {
   }
 };
 
+// src/lib/baw.ts
+init_errors5();
+import { execFile } from "node:child_process";
+var BSC = "56";
+async function baw(args) {
+  const stdout = await new Promise((resolve4, reject) => {
+    execFile("baw", [...args, "--json"], { maxBuffer: 8 << 20, timeout: 12e4 }, (error51, out, err2) => {
+      if (error51?.code === "ENOENT") {
+        reject(
+          new CliError(
+            "`baw` (the Binance Agentic Wallet CLI) is not installed or not on PATH.",
+            "npm i -g @binance/agentic-wallet, then `baw auth signin`."
+          )
+        );
+        return;
+      }
+      if (out.trim()) resolve4(out);
+      else reject(new CliError(`baw ${args.slice(0, 2).join(" ")} failed: ${(err2 || error51?.message || "").trim()}`));
+    });
+  });
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new CliError(`baw ${args.slice(0, 2).join(" ")} did not print JSON: ${stdout.slice(0, 200)}`);
+  }
+  if (!parsed.success) {
+    const e = parsed.error ?? {};
+    const code2 = e.code !== void 0 ? ` (${e.code})` : "";
+    throw new CliError(`baw ${args.slice(0, 2).join(" ")} failed: ${e.message ?? e.name ?? "unknown error"}${code2}`);
+  }
+  return parsed.data;
+}
+async function bawAddress() {
+  const status = await baw(["wallet", "status"]);
+  if (status.status !== "CONNECTED") {
+    throw new CliError("baw is not signed in.", "Run `baw auth signin` and confirm in the Binance App.");
+  }
+  const { addresses } = await baw([
+    "wallet",
+    "address"
+  ]);
+  const bsc2 = addresses.find((a) => a.binanceChainId === BSC);
+  if (!bsc2) throw new CliError("Your Agentic Wallet has no BNB Chain address.");
+  return bsc2.address;
+}
+async function requireDevMode() {
+  const { devMode } = await baw(["wallet", "settings"]);
+  const expiresMs = devMode?.expiresAt ? devMode.expiresAt * (devMode.expiresAt < 1e12 ? 1e3 : 1) : Infinity;
+  if (!devMode?.enabled || expiresMs < Date.now()) {
+    throw new CliError(
+      "Developer Mode is off or has expired on your Agentic Wallet.",
+      "In the Binance App: Agentic Wallet \u2192 Settings \u2192 Developer Mode, accept the risk warning, then run this again. It stays on for 7 days."
+    );
+  }
+}
+async function bawSignTypedData(wallet, typedData, options = {}) {
+  const message = JSON.stringify({ method: "eth_signTypedData_v4", params: [wallet, JSON.stringify(typedData)] });
+  const preview = await baw([
+    "sign-message",
+    "preview",
+    "--binanceChainId",
+    BSC,
+    "--signType",
+    "EIP712",
+    "--message",
+    message
+  ]);
+  if (!preview.requestId) {
+    throw new CliError("Binance's risk check stopped this signature request.", JSON.stringify(preview.risks ?? {}));
+  }
+  let order = await baw(["sign-message", "execute", "--requestId", preview.requestId]);
+  if (order.status === "PENDING_CONFIRMATION") {
+    options.onPending?.();
+    const deadline = Date.now() + (options.timeoutMs ?? 3e5);
+    while (order.status === "PENDING_CONFIRMATION") {
+      if (Date.now() > deadline) {
+        throw new CliError(
+          "Timed out waiting for the approval in the Binance App.",
+          "Run the command again and approve within the time limit (--timeout)."
+        );
+      }
+      await new Promise((resolve4) => setTimeout(resolve4, options.pollMs ?? 3e3));
+      order = await baw(["sign-message", "result", "--order-id", order.orderId]);
+    }
+  }
+  if (order.status !== "COMPLETED" || !order.signature) {
+    throw new CliError(`The signature request was ${String(order.status).toLowerCase()} in the Binance App.`);
+  }
+  return toRsv(order.signature, order.signatureRecovery);
+}
+function toRsv(signature, recovery) {
+  const sig = signature.trim().replace(/^0x/, "");
+  if (sig.length === 130) return `0x${sig}`;
+  if (sig.length === 128 && recovery !== null) {
+    const r = recovery.trim();
+    const n = /^\d+$/.test(r) ? Number.parseInt(r, 10) : Number.parseInt(r, 16);
+    const v = n < 27 ? n + 27 : n;
+    return `0x${sig}${v.toString(16).padStart(2, "0")}`;
+  }
+  throw new CliError(`Unexpected signature from baw (${sig.length / 2} bytes).`);
+}
+
 // src/commands/agent.ts
 init_context();
-init_errors();
+init_errors5();
+
+// src/lib/prompt.ts
+init_errors5();
+import * as readline from "node:readline/promises";
+var requireTty = (what) => {
+  if (!process.stdin.isTTY) {
+    throw new CliError(
+      `${what} requires an interactive terminal.`,
+      "Pass the value as a flag, or set the matching environment variable."
+    );
+  }
+};
+async function ask(question, fallback2 = "") {
+  requireTty("This prompt");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(fallback2 ? `${question} [${fallback2}] ` : `${question} `);
+    return answer.trim() || fallback2;
+  } finally {
+    rl.close();
+  }
+}
+async function confirm(question, fallback2 = false) {
+  const answer = await ask(`${question} ${fallback2 ? "[Y/n]" : "[y/N]"}`);
+  if (!answer) return fallback2;
+  return /^y(es)?$/i.test(answer.trim());
+}
+async function askSecret(question) {
+  requireTty("This prompt");
+  process.stderr.write(question + " ");
+  const stdin = process.stdin;
+  const wasRaw = stdin.isRaw;
+  stdin.setRawMode(true);
+  stdin.resume();
+  return await new Promise((resolve4, reject) => {
+    let value = "";
+    const onData = (chunk) => {
+      for (const byte of chunk) {
+        if (byte === 3) {
+          cleanup();
+          reject(new CliError("Aborted."));
+          return;
+        }
+        if (byte === 13 || byte === 10) {
+          cleanup();
+          process.stderr.write("\n");
+          resolve4(value.trim());
+          return;
+        }
+        if (byte === 8 || byte === 127) {
+          value = value.slice(0, -1);
+          continue;
+        }
+        if (byte >= 32) value += String.fromCharCode(byte);
+      }
+    };
+    const cleanup = () => {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(wasRaw ?? false);
+      stdin.pause();
+    };
+    stdin.on("data", onData);
+  });
+}
+async function select(title, options, defaultIndex = 0) {
+  requireTty("This prompt");
+  process.stderr.write(title + "\n");
+  options.forEach((option, i) => {
+    process.stderr.write(`  ${i + 1}) ${option.label}
+`);
+  });
+  for (; ; ) {
+    const answer = await ask("Choice", String(defaultIndex + 1));
+    const index2 = Number(answer) - 1;
+    const chosen = options[index2];
+    if (chosen) return chosen.value;
+    process.stderr.write("  Please enter a number from the list.\n");
+  }
+}
+
+// src/commands/agent.ts
 init_config();
 
 // src/lib/agentCard.ts
@@ -168363,6 +168583,92 @@ function registerAgentCommands(program3) {
         ["endpoint", config2.endpointUrl || "gateway polling"],
         ["price", `${config2.costModel?.baseCallFee} ${config2.currency}`],
         ["offerings", (config2.jobOfferings ?? []).length]
+      ]);
+      hint('Start taking work with `bitagent agent serve --exec "<your command>"`.');
+    });
+  });
+  agent.command("activate").description("Activate your Binance Agent ID (alice.ai) as an AIP agent \u2014 signed with baw, no gas").option("--name <name>", "Display name (defaults to your .ai name)").option("--description <text>", "What the agent does", "").option("--url <url>", "Public A2A endpoint. Omit for gateway-polling (private) agents").option("--price <amount>", "Base call fee, in USD", "0.001").option("--currency <code>", "Price currency", "USD").option(
+    "--skill <name:description...>",
+    "Repeatable. A capability listed on the agent card",
+    collect,
+    []
+  ).option("--tag <tag...>", "Repeatable. Capability tags used for discovery", collect, []).option(
+    "--offering <name:price[:description]...>",
+    "Repeatable. A hireable job offering",
+    collect,
+    []
+  ).option("--metadata <json>", "Extra metadata object, as JSON").option("--timeout <seconds>", "How long to wait for the approval in the Binance App", "300").option("-y, --yes", "Sign without asking for confirmation").action(async function() {
+    const globals = this.optsWithGlobals();
+    if (globals.network && resolveNetworkOption(globals.network).chainId !== 56) {
+      throw new CliError("Binance Agent IDs live on BNB Chain mainnet.", "Drop --network, or use --network bsc.");
+    }
+    setJsonMode(Boolean(globals.json));
+    const ctx = buildContext({ ...globals, network: "bsc" });
+    const options = this.opts();
+    const wallet = await bawAddress();
+    await requireDevMode();
+    const aip = AipClient.from(ctx);
+    const challenge2 = await aip.agentIdChallenge(wallet).catch((e) => {
+      if (e instanceof ApiError && e.status === 404) {
+        throw new CliError(
+          `${wallet} holds no Binance Agent ID.`,
+          "Claim one in the Binance App (Wallet \u2192 Agentic Wallet \u2192 Agent ID). Just claimed it? It takes a minute to land on-chain."
+        );
+      }
+      throw e;
+    });
+    const config2 = buildAgentConfig(ctx, {
+      ...options,
+      name: options.name ?? challenge2.agent_id,
+      handle: challenge2.agent_id
+    });
+    const payload = toRegistrationMap(config2);
+    delete payload.handle;
+    delete payload.chain_id;
+    heading(`Activate ${challenge2.agent_id}`);
+    kv([
+      ["agentic wallet", wallet],
+      ["agent id", challenge2.agent_id],
+      ["chain", "BNB Chain (56)"],
+      ["challenge expires", new Date(challenge2.expires_at * 1e3).toLocaleTimeString()]
+    ]);
+    if (!options.yes) {
+      if (!process.stdin.isTTY) {
+        throw new CliError("Confirmation needed.", "Run it again with --yes to sign without a prompt.");
+      }
+      if (!await confirm(`Sign the activation of ${challenge2.agent_id} with your Agentic Wallet?`, true)) {
+        throw new CliError("Cancelled \u2014 nothing was signed.");
+      }
+    }
+    step2("Signing with baw \u2026");
+    const signature = await bawSignTypedData(wallet, challenge2.typed_data, {
+      timeoutMs: Number(options.timeout) * 1e3,
+      onPending: () => info(`  ${import_picocolors.default.yellow("\u2192")} Approve the signature request in the Binance App \u2026`)
+    });
+    const signer = await recoverTypedDataAddress({
+      ...challenge2.typed_data,
+      signature
+    });
+    if (signer.toLowerCase() !== wallet.toLowerCase()) {
+      throw new CliError(`baw returned a signature from ${signer}, not from ${wallet}.`);
+    }
+    step2(`Activating ${challenge2.agent_id} on ${ctx.aip} \u2026`);
+    const response = await aip.activateAgentId({ ...payload, nonce: challenge2.nonce, signature });
+    const agentId = String(response.agent_id ?? "");
+    if (agentId) {
+      updateConfig((saved) => {
+        saved.agentId = agentId;
+        saved.agentWallet = wallet;
+      });
+    }
+    result(response, () => {
+      success(`${response.status === "already_registered" ? "Already active" : "Activated"}: ${challenge2.agent_id}`);
+      kv([
+        ["agent id", agentId || "(not returned)"],
+        ["handle", response.handle],
+        ["payout wallet", response.agent_wallet],
+        ["owner", wallet],
+        ["endpoint", config2.endpointUrl || "gateway polling"]
       ]);
       hint('Start taking work with `bitagent agent serve --exec "<your command>"`.');
     });
@@ -168599,7 +168905,7 @@ init_esm();
 init_chains2();
 init_config();
 init_context();
-init_errors();
+init_errors5();
 init_aip();
 init_credentials();
 init_output();
@@ -168766,11 +169072,11 @@ init_accounts();
 init_chains2();
 init_config();
 init_context();
-init_errors();
+init_errors5();
 
 // src/lib/api/pay.ts
-init_http();
-init_errors();
+init_http3();
+init_errors5();
 async function initAuth(payBase) {
   const response = await request(payBase, "/v1/init", {
     method: "POST",
@@ -168788,87 +169094,6 @@ async function initAuth(payBase) {
 // src/commands/configure.ts
 init_aip();
 init_credentials();
-
-// src/lib/prompt.ts
-init_errors();
-import * as readline from "node:readline/promises";
-var requireTty = (what) => {
-  if (!process.stdin.isTTY) {
-    throw new CliError(
-      `${what} requires an interactive terminal.`,
-      "Pass the value as a flag, or set the matching environment variable."
-    );
-  }
-};
-async function ask(question, fallback2 = "") {
-  requireTty("This prompt");
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-  try {
-    const answer = await rl.question(fallback2 ? `${question} [${fallback2}] ` : `${question} `);
-    return answer.trim() || fallback2;
-  } finally {
-    rl.close();
-  }
-}
-async function confirm(question, fallback2 = false) {
-  const answer = await ask(`${question} ${fallback2 ? "[Y/n]" : "[y/N]"}`);
-  if (!answer) return fallback2;
-  return /^y(es)?$/i.test(answer.trim());
-}
-async function askSecret(question) {
-  requireTty("This prompt");
-  process.stderr.write(question + " ");
-  const stdin = process.stdin;
-  const wasRaw = stdin.isRaw;
-  stdin.setRawMode(true);
-  stdin.resume();
-  return await new Promise((resolve4, reject) => {
-    let value = "";
-    const onData = (chunk) => {
-      for (const byte of chunk) {
-        if (byte === 3) {
-          cleanup();
-          reject(new CliError("Aborted."));
-          return;
-        }
-        if (byte === 13 || byte === 10) {
-          cleanup();
-          process.stderr.write("\n");
-          resolve4(value.trim());
-          return;
-        }
-        if (byte === 8 || byte === 127) {
-          value = value.slice(0, -1);
-          continue;
-        }
-        if (byte >= 32) value += String.fromCharCode(byte);
-      }
-    };
-    const cleanup = () => {
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(wasRaw ?? false);
-      stdin.pause();
-    };
-    stdin.on("data", onData);
-  });
-}
-async function select(title, options, defaultIndex = 0) {
-  requireTty("This prompt");
-  process.stderr.write(title + "\n");
-  options.forEach((option, i) => {
-    process.stderr.write(`  ${i + 1}) ${option.label}
-`);
-  });
-  for (; ; ) {
-    const answer = await ask("Choice", String(defaultIndex + 1));
-    const index2 = Number(answer) - 1;
-    const chosen = options[index2];
-    if (chosen) return chosen.value;
-    process.stderr.write("  Please enter a number from the list.\n");
-  }
-}
-
-// src/commands/configure.ts
 init_output();
 function registerConfigureCommand(program3) {
   program3.command("configure").description("Set up your default network and credential (interactive)").option("--token <jwt>", "Store this Unibase Pay JWT instead of prompting").option("--private-key <hex>", "Store this wallet private key instead of prompting").option("--set-network <name>", "Store this network as the default instead of prompting").action(async function() {
@@ -168992,7 +169217,7 @@ async function report(ctx) {
 // src/commands/job.ts
 init_aip();
 init_context();
-init_errors();
+init_errors5();
 init_credentials();
 init_output();
 import { readFileSync as readFileSync2 } from "node:fs";
@@ -169204,7 +169429,7 @@ function renderJob(record2, verbose = false) {
 // src/commands/market.ts
 init_aip();
 init_context();
-init_errors();
+init_errors5();
 init_output();
 var agentName = (agent) => agent.display_name || agent.card?.name || agent.handle || agent.agent_id;
 var agentPrice = (agent) => {
@@ -169460,7 +169685,7 @@ your proxy wallet when it hires a provider on your behalf.
 }
 
 // src/commands/skill.ts
-init_errors();
+init_errors5();
 init_output();
 import { existsSync, readFileSync as readFileSync3 } from "node:fs";
 import { dirname as dirname2, resolve as resolve3 } from "node:path";
@@ -169528,7 +169753,7 @@ function registerSkillCommands(program3) {
 init_aip();
 init_config();
 init_context();
-init_errors();
+init_errors5();
 init_credentials();
 init_output();
 import { randomUUID } from "node:crypto";
@@ -169811,8 +170036,8 @@ function renderMessage(message) {
 init_esm();
 
 // src/lib/api/bitagent.ts
-init_http();
-init_errors();
+init_http3();
+init_errors5();
 var BitagentClient = class _BitagentClient {
   constructor(base4) {
     this.base = base4;
@@ -184383,7 +184608,7 @@ var supportedChainsMap = {
 var bitagent = new BitAgentSDK();
 
 // src/lib/bonding.ts
-init_errors();
+init_errors5();
 init_credentials();
 init_output();
 var BOND_VERSION = "3.1.0";
@@ -184577,7 +184802,7 @@ function asCliError(e, prefix) {
 // src/commands/token.ts
 init_chains2();
 init_context();
-init_errors();
+init_errors5();
 init_credentials();
 init_output();
 function registerTokenCommands(program3) {
@@ -184860,7 +185085,7 @@ async function showNativeBalance(ctx, wallet) {
 
 // bin/bitagent.ts
 init_context();
-init_errors();
+init_errors5();
 init_output();
 var require2 = createRequire(import.meta.url);
 function version7() {
