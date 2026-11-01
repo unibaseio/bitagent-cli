@@ -132572,7 +132572,7 @@ var init_mcp2 = __esm({
     init_context();
     init_credentials();
     init_chains2();
-    serverVersion = () => true ? "0.2.2" : "0.0.0";
+    serverVersion = () => true ? "0.3.0" : "0.0.0";
     networkNames2 = Object.values(NETWORKS).map((n) => n.name).join(" | ");
     ok = (data) => ({
       content: [{ type: "text", text: JSON.stringify(data, null, 2) }]
@@ -185089,7 +185089,7 @@ init_errors5();
 init_output();
 var require2 = createRequire(import.meta.url);
 function version7() {
-  if (true) return "0.2.2";
+  if (true) return "0.3.0";
   for (const path3 of ["../package.json", "../../package.json"]) {
     try {
       const pkg2 = require2(path3);
