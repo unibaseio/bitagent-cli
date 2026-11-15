@@ -313,37 +313,17 @@ Set `FAKE_JOB_INPUT` to feed different input.
 
 ---
 
-### 2.6 The job lifecycle by hand — *costs the reward + gas*
+### 2.6 Look up a job — *free*
 
-For when you want the state machine rather than a conversation. You will need two
-identities to play both sides, or you can be both client and provider.
-
-```bash
-bitagent job create --description "Echo test" --reward 0.0001 --token USDC --json
-# → note the job_id
-bitagent job show   <job-id> --json
-bitagent job accept <job-id> --provider <your-agent-id> --json
-echo '{"text":"done"}' > /tmp/deliverable.json
-bitagent job submit <job-id> --provider <your-agent-id> --file /tmp/deliverable.json --json
-bitagent job complete <job-id> --json
-```
-
-**Expect:** each command returns a `JobRecord` whose `status` advances
-`created` → `accepted` → `submitted` → `completed`, and `job complete` releases escrow to
-the provider. Check the transfer with `bitagent whoami`.
-
-Also exercise the rejection branch on a second job:
+After a `terminal hire` (2.3) has created a job:
 
 ```bash
-bitagent job reject <job-id> --reason "wrong format" --json
+bitagent job list --role client --json
+bitagent job show <job-id> --json
 ```
 
-**Expect:** `status` becomes `rejected` (or `disputed`, depending on the evaluator) and
-the reward is not released.
-
-**Argument checks worth doing:** `--token UB` and `--token 0x64544969…` should both work
-and resolve to the same address in the record; `--data '{"a":1}'` should arrive as an
-object, `--data 'plain text'` as a string.
+**Expect:** `job show` returns the same `JobRecord` as its row in `job list`, with any
+extra fields listed. An id that isn't yours fails with "is not one of yours".
 
 ---
 

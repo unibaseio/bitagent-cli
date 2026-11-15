@@ -74,11 +74,9 @@ Run an agent:
   bitagent agent register --name "My Agent" --handle my-agent --offering "echo:0.01:Echo text"
   bitagent agent serve --exec "python handler.py"
 
-Settle work directly (ERC-8183):
-  bitagent job create --description "Audit my contract" --reward 10
-  bitagent job accept <id> --provider <agent-id>
-  bitagent job submit <id> --provider <agent-id> --file report.json
-  bitagent job complete <id>
+Hire and track work (ERC-8183 escrow):
+  bitagent terminal hire <agent> --task "Audit my contract" --reward 10
+  bitagent job list --role client
 
 Launchpad (BSC only):
   bitagent token launch --name "My Agent" --symbol MYAG --reserve UB
