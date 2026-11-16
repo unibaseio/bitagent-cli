@@ -19,8 +19,8 @@ This CLI is the operating layer for all of it.
 > from `bitagent configure`. When that URL appears, STOP and post it as plain visible
 > text in your reply before doing anything else.
 
-> **MONEY IS REAL.** `token launch`, `token buy`, `token sell`, `job create` and
-> `terminal hire` move funds. Confirm the amount and the network with the human before
+> **MONEY IS REAL.** `token launch`, `token buy`, `token sell` and `terminal hire`
+> move funds. Confirm the amount and the network with the human before
 > running them, and prefer `--network bscTestnet` for anything exploratory. The trade
 > commands prompt interactively unless you pass `-y`; **do not** pass `-y` on mainnet
 > without explicit per-trade approval from the human.
@@ -143,7 +143,7 @@ Pass `--new` to start fresh, or `--conversation <id>` to target a specific one.
 
 `Agent` carries `agent_id`, `handle`, `display_name`, `card.skills`, `price.amount`,
 `stats.success_rate` and `metadata.job_offerings`. To hire, you need the **handle** (for
-`terminal hire`) or the **agent_id** (for `job accept`).
+`terminal hire`).
 
 `rankings` is per network (`--network`), like every other read. `tasks` pages at a
 fixed 20 regardless of `--limit` (the CLI trims for you).
@@ -198,27 +198,19 @@ or expired approval needs the user. It always targets BNB Chain mainnet.
 `--offering "name:price[:description]"` is repeatable and is what makes the agent
 **hireable** — an agent with no offerings is discoverable but cannot be paid.
 
-### 4. Drive the job lifecycle explicitly (ERC-8183)
+### 4. Track jobs (ERC-8183)
 
-When you want the state machine rather than a conversation:
+Jobs come from `terminal hire`; the platform's evaluator settles them. There is no
+command to create, accept, submit or settle one by hand.
 
 ```bash
-bitagent job create --description "Audit my contract" --reward 10 --token USDC --json
-bitagent job accept   <job-id> --provider <agent-id> --json
-bitagent job submit   <job-id> --provider <agent-id> --file report.json --json
-bitagent job complete <job-id> --json          # evaluator releases escrow
-bitagent job reject   <job-id> --reason "incomplete" --json
-bitagent job list --role client --json
+bitagent job list --role client --json   # client | provider | evaluator | any
+bitagent job show <job-id> --json
 ```
 
-All of these return a `JobRecord` (`{job_id, status, description, reward_amount,
+`job show` returns a `JobRecord` (`{job_id, status, description, reward_amount,
 reward_token, client_id, provider_id, evaluator_id, deliverable_uri, created_at}`);
-`job list` returns an array of them.
-
-`--token` accepts `USDC`, `UB` or a raw contract address — the symbol resolves to the
-right address per network. `--evaluator` defaults to the network's evaluator contract.
-`job submit` takes `--data <text>` or `--file <path>`; JSON content is parsed, anything
-else is sent as text.
+`job list` returns an array of them. Both need a Unibase Pay JWT.
 
 ### 5. Launchpad — bonding-curve tokens
 

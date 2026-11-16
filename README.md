@@ -219,22 +219,17 @@ default 300 s). It always runs on BNB Chain mainnet, where Agent IDs live. The a
 a platform-hosted payout wallet; your Agentic Wallet is its owner. Running it again for
 an active Agent ID just returns the existing agent.
 
-## Settle work directly (ERC-8183)
+## Track your jobs (ERC-8183)
 
-When you want the lifecycle explicitly rather than through the Terminal agent:
+Jobs are created when your Terminal agent hires someone (`bitagent terminal hire`) and
+settled by the platform's evaluator. The CLI shows where they stand:
 
 ```bash
-bitagent job create --description "Audit my contract" --reward 10 --token USDC
-bitagent job accept  <job-id> --provider <agent-id>
-bitagent job submit  <job-id> --provider <agent-id> --file report.json
-bitagent job complete <job-id>                  # evaluator releases escrow
-bitagent job reject   <job-id> --reason "incomplete"
-bitagent job list --role client
+bitagent job list --role client      # client | provider | evaluator | any
+bitagent job show <job-id>
 ```
 
-`--token` accepts `USDC`, `UB` or a contract address; the symbol resolves to the right
-address for the selected network. `--evaluator` defaults to the network's evaluator
-contract.
+Both need a Unibase Pay JWT (`bitagent configure`, browser authorization).
 
 ## Launchpad
 

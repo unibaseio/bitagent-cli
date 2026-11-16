@@ -198,15 +198,6 @@ export class AipClient {
     return request<T>(this.base, path, { query: { chain_id: this.chainId, ...query }, token });
   }
 
-  private post<T>(path: string, body?: unknown, query?: Query, token?: string): Promise<T> {
-    return request<T>(this.base, path, {
-      method: "POST",
-      body: body ?? {},
-      query: { chain_id: this.chainId, ...query },
-      token,
-    });
-  }
-
   // ------------------------------------------------------------ discovery
 
   listAgents(query: Query = {}): Promise<Paged<Agent>> {
@@ -321,7 +312,10 @@ export class AipClient {
     body: { signature?: string; message?: string; chain_id: number; wallet_address?: string },
     token?: string,
   ): Promise<{ status?: string; agent_id?: string; wallet_address?: string }> {
-    return request(this.base, "/butler/activate", { method: "POST", body, token });
+    // /butler/activate requires a signature; with only a JWT, V2 resolves the
+    // custodial wallet from the token instead.
+    const path = body.signature ? "/butler/activate" : "/butler-v2/activate";
+    return request(this.base, path, { method: "POST", body, token });
   }
 
   butlerStats(token: string): Promise<Record<string, unknown>> {
@@ -364,68 +358,4 @@ export class AipClient {
     return this.get(`/conversations/${encodeURIComponent(conversationId)}/history`, {}, token);
   }
 
-  // ------------------------------------------------------------ jobs (8183)
-
-  createJob(
-    clientId: string,
-    body: {
-      description: string;
-      reward_amount: number;
-      reward_token: string;
-      evaluator_id?: string;
-      expires_in?: number;
-      metadata?: Record<string, unknown>;
-    },
-    token?: string,
-  ): Promise<JobRecord> {
-    return request<JobRecord>(this.base, "/v1/jobs", {
-      method: "POST",
-      body: { expires_in: 86_400, metadata: {}, ...body },
-      query: { client_id: clientId, chain_id: this.chainId },
-      token,
-    });
-  }
-
-  getJob(jobId: string, token?: string): Promise<JobRecord> {
-    return this.get<JobRecord>(`/v1/jobs/${encodeURIComponent(jobId)}`, {}, token);
-  }
-
-  acceptJob(jobId: string, providerId: string, token?: string): Promise<JobRecord> {
-    return this.post<JobRecord>(
-      `/v1/jobs/${encodeURIComponent(jobId)}/accept`,
-      undefined,
-      { provider_id: providerId },
-      token,
-    );
-  }
-
-  submitJob(
-    jobId: string,
-    body: { provider_id: string; deliverable_data: unknown; description?: string },
-    token?: string,
-  ): Promise<JobRecord> {
-    return this.post<JobRecord>(`/v1/jobs/${encodeURIComponent(jobId)}/submit`, body, {}, token);
-  }
-
-  completeJob(
-    jobId: string,
-    body: { evaluator_id: string; reason?: string },
-    token?: string,
-  ): Promise<JobRecord> {
-    return this.post<JobRecord>(`/v1/jobs/${encodeURIComponent(jobId)}/complete`, body, {}, token);
-  }
-
-  rejectJob(
-    jobId: string,
-    rejectorId: string,
-    reason: string,
-    token?: string,
-  ): Promise<JobRecord> {
-    return this.post<JobRecord>(
-      `/v1/jobs/${encodeURIComponent(jobId)}/reject`,
-      { reason },
-      { rejector_id: rejectorId },
-      token,
-    );
-  }
 }

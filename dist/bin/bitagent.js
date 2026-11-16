@@ -28158,14 +28158,6 @@ var init_aip = __esm({
       get(path3, query, token) {
         return request(this.base, path3, { query: { chain_id: this.chainId, ...query }, token });
       }
-      post(path3, body, query, token) {
-        return request(this.base, path3, {
-          method: "POST",
-          body: body ?? {},
-          query: { chain_id: this.chainId, ...query },
-          token
-        });
-      }
       // ------------------------------------------------------------ discovery
       listAgents(query = {}) {
         return this.get("/agents", { page: 1, pageSize: 50, ...query });
@@ -28253,7 +28245,8 @@ var init_aip = __esm({
         });
       }
       activateButler(body, token) {
-        return request(this.base, "/butler/activate", { method: "POST", body, token });
+        const path3 = body.signature ? "/butler/activate" : "/butler-v2/activate";
+        return request(this.base, path3, { method: "POST", body, token });
       }
       butlerStats(token) {
         return this.get("/butler/stats", {}, token);
@@ -28277,40 +28270,6 @@ var init_aip = __esm({
       }
       conversationHistory(conversationId, token) {
         return this.get(`/conversations/${encodeURIComponent(conversationId)}/history`, {}, token);
-      }
-      // ------------------------------------------------------------ jobs (8183)
-      createJob(clientId, body, token) {
-        return request(this.base, "/v1/jobs", {
-          method: "POST",
-          body: { expires_in: 86400, metadata: {}, ...body },
-          query: { client_id: clientId, chain_id: this.chainId },
-          token
-        });
-      }
-      getJob(jobId2, token) {
-        return this.get(`/v1/jobs/${encodeURIComponent(jobId2)}`, {}, token);
-      }
-      acceptJob(jobId2, providerId, token) {
-        return this.post(
-          `/v1/jobs/${encodeURIComponent(jobId2)}/accept`,
-          void 0,
-          { provider_id: providerId },
-          token
-        );
-      }
-      submitJob(jobId2, body, token) {
-        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/submit`, body, {}, token);
-      }
-      completeJob(jobId2, body, token) {
-        return this.post(`/v1/jobs/${encodeURIComponent(jobId2)}/complete`, body, {}, token);
-      }
-      rejectJob(jobId2, rejectorId, reason, token) {
-        return this.post(
-          `/v1/jobs/${encodeURIComponent(jobId2)}/reject`,
-          { reason },
-          { rejector_id: rejectorId },
-          token
-        );
       }
     };
   }
@@ -169220,47 +169179,13 @@ init_context();
 init_errors5();
 init_credentials();
 init_output();
-import { readFileSync as readFileSync2 } from "node:fs";
-var userId = (wallet) => wallet.startsWith("user:") ? wallet : `user:${wallet}`;
 function registerJobCommands(program3) {
-  const job = program3.command("job").description("Create, fund and settle ERC-8183 jobs");
-  job.command("create").description("Create a job with an escrowed reward").requiredOption("--description <text>", "What the provider must deliver").requiredOption("--reward <amount>", "Reward amount").option("--token <symbolOrAddress>", "Reward token: USDC, UB, or a contract address", "USDC").option("--evaluator <id>", "Evaluator id (defaults to the network's evaluator contract)").option("--client <id>", "Client id (defaults to user:<your wallet>)").option("--expires-in <seconds>", "Job expiry", "86400").option("--metadata <json>", "Extra metadata object, as JSON").action(async function() {
-    const ctx = resolveContext(this);
-    const options = this.opts();
-    const credentials = requireCredentials();
-    const reward = Number(options.reward);
-    if (!Number.isFinite(reward) || reward <= 0) {
-      throw new CliError(`Invalid --reward "${options.reward}".`);
-    }
-    const created = await AipClient.from(ctx).createJob(
-      options.client ?? userId(credentials.wallet),
-      {
-        description: options.description,
-        reward_amount: reward,
-        reward_token: resolveRewardToken(ctx, options.token),
-        evaluator_id: options.evaluator ?? ctx.net.contracts.evaluator,
-        expires_in: Number(options.expiresIn),
-        metadata: parseMetadata(options.metadata)
-      },
-      credentials.token || void 0
-    );
-    result(created, () => {
-      success(`Job ${jobId(created)} created`);
-      renderJob(created);
-      hint("Bind a provider with `bitagent job accept <id> --provider <agent-id>`.");
-    });
-  });
+  const job = program3.command("job").description("List and inspect your ERC-8183 jobs (hire with `terminal hire`)");
   job.command("list").description("List your jobs").option("--role <role>", "client | provider | evaluator | any", "any").option("--limit <n>", "Maximum rows", "30").action(async function() {
     const ctx = resolveContext(this);
     const options = this.opts();
-    const credentials = requireCredentials();
-    if (!credentials.token) {
-      throw new CliError(
-        "`job list` needs a Unibase Pay JWT.",
-        "Run `bitagent configure` and choose browser authorization."
-      );
-    }
-    const jobs = (await AipClient.from(ctx).myJobs(credentials.token, options.role)).slice(
+    const token = requireToken("job list");
+    const jobs = (await AipClient.from(ctx).myJobs(token, options.role)).slice(
       0,
       Number(options.limit)
     );
@@ -169279,118 +169204,37 @@ function registerJobCommands(program3) {
       ]);
     });
   });
-  job.command("show <jobId>").description("Show one job in full").action(async function(id) {
+  job.command("show <jobId>").description("Show one of your jobs in full").action(async function(id) {
     const ctx = resolveContext(this);
-    const credentials = requireCredentials();
-    const record2 = await AipClient.from(ctx).getJob(id, credentials.token || void 0);
+    const jobs = await AipClient.from(ctx).myJobs(requireToken("job show"), "any");
+    const record2 = jobs.find((j) => jobId(j) === id);
+    if (!record2) {
+      throw new CliError(`Job ${id} is not one of yours on ${ctx.net.label}.`, "List them with `bitagent job list`.");
+    }
     result(record2, () => renderJob(record2, true));
   });
-  job.command("accept <jobId>").description("Accept a job as the provider").requiredOption("--provider <id>", "Provider agent id").action(async function(id) {
-    const ctx = resolveContext(this);
-    const { provider } = this.opts();
-    const credentials = requireCredentials();
-    const record2 = await AipClient.from(ctx).acceptJob(
-      id,
-      provider,
-      credentials.token || void 0
+}
+function requireToken(command) {
+  const credentials = requireCredentials();
+  if (!credentials.token) {
+    throw new CliError(
+      `\`${command}\` needs a Unibase Pay JWT.`,
+      "Run `bitagent configure` and choose browser authorization."
     );
-    result(record2, () => {
-      success(`Job ${id} accepted by ${provider}`);
-      renderJob(record2);
-    });
-  });
-  job.command("submit <jobId>").description("Submit the deliverable as the provider").requiredOption("--provider <id>", "Provider agent id").option("--data <text>", "Deliverable payload; JSON is parsed, anything else sent as text").option("--file <path>", "Read the deliverable from a file instead of --data").option("--description <text>", "Note attached to the submission", "").action(async function(id) {
-    const ctx = resolveContext(this);
-    const options = this.opts();
-    const credentials = requireCredentials();
-    const raw = options.file ? readFileSync2(options.file, "utf8") : options.data;
-    if (raw === void 0) {
-      throw new CliError("Provide the deliverable with --data or --file.");
-    }
-    const record2 = await AipClient.from(ctx).submitJob(
-      id,
-      {
-        provider_id: options.provider,
-        deliverable_data: parseLoose(raw),
-        description: options.description
-      },
-      credentials.token || void 0
-    );
-    result(record2, () => {
-      success(`Deliverable submitted for job ${id}`);
-      renderJob(record2);
-      hint("The evaluator releases escrow with `bitagent job complete <id>`.");
-    });
-  });
-  job.command("complete <jobId>").description("Approve the deliverable as the evaluator and release escrow").option("--evaluator <id>", "Evaluator id (defaults to the network's evaluator contract)").option("--reason <text>", "Why it was approved", "Deliverable accepted").action(async function(id) {
-    const ctx = resolveContext(this);
-    const options = this.opts();
-    const credentials = requireCredentials();
-    const evaluator = options.evaluator ?? ctx.net.contracts.evaluator;
-    if (!evaluator) {
-      throw new CliError(`No evaluator configured for ${ctx.net.label}. Pass --evaluator.`);
-    }
-    const record2 = await AipClient.from(ctx).completeJob(
-      id,
-      { evaluator_id: evaluator, reason: options.reason },
-      credentials.token || void 0
-    );
-    result(record2, () => {
-      success(`Job ${id} completed \u2014 escrow released`);
-      renderJob(record2);
-    });
-  });
-  job.command("reject <jobId>").description("Reject the deliverable").requiredOption("--reason <text>", "Why it was rejected").option("--rejector <id>", "Rejector id (defaults to user:<your wallet>)").action(async function(id) {
-    const ctx = resolveContext(this);
-    const options = this.opts();
-    const credentials = requireCredentials();
-    const record2 = await AipClient.from(ctx).rejectJob(
-      id,
-      options.rejector ?? userId(credentials.wallet),
-      options.reason,
-      credentials.token || void 0
-    );
-    result(record2, () => {
-      success(`Job ${id} rejected`);
-      renderJob(record2);
-    });
-  });
+  }
+  return credentials.token;
 }
 var jobId = (record2) => String(record2.job_id ?? record2.id ?? "\u2014");
 var shorten = (value) => {
   if (!value) return "\u2014";
   return value.length > 26 ? `${value.slice(0, 12)}\u2026${value.slice(-8)}` : value;
 };
-function resolveRewardToken(ctx, token) {
-  if (token.startsWith("0x")) return token;
-  const upper = token.toUpperCase();
-  if (upper === "USDC" && ctx.net.contracts.usdc) return ctx.net.contracts.usdc;
-  if (upper === "UB" && ctx.net.contracts.ub) return ctx.net.contracts.ub;
-  return token;
-}
 function symbolOf(ctx, token) {
   if (!token) return "";
   const lower = token.toLowerCase();
   if (lower === ctx.net.contracts.usdc?.toLowerCase()) return "USDC";
   if (lower === ctx.net.contracts.ub?.toLowerCase()) return "UB";
   return token.startsWith("0x") ? `${token.slice(0, 6)}\u2026` : token;
-}
-function parseMetadata(value) {
-  if (!value) return {};
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw new CliError("--metadata must be valid JSON.");
-  }
-}
-function parseLoose(value) {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return trimmed;
-  }
 }
 function renderJob(record2, verbose = false) {
   kv([
@@ -169687,7 +169531,7 @@ your proxy wallet when it hires a provider on your behalf.
 // src/commands/skill.ts
 init_errors5();
 init_output();
-import { existsSync, readFileSync as readFileSync3 } from "node:fs";
+import { existsSync, readFileSync as readFileSync2 } from "node:fs";
 import { dirname as dirname2, resolve as resolve3 } from "node:path";
 import { fileURLToPath } from "node:url";
 function skillPath() {
@@ -169719,7 +169563,7 @@ function registerSkillCommands(program3) {
   });
   skill.command("print").description("Print the bundled SKILL.md").action(function() {
     const path3 = skillPath();
-    const content = readFileSync3(path3, "utf8");
+    const content = readFileSync2(path3, "utf8");
     result({ path: path3, content }, () => process.stdout.write(content));
   });
   skill.command("check").description("Compare a loaded skill copy against the installed CLI version").requiredOption("--against <version>", "The bitagentCliVersion your loaded copy declares").action(function() {
@@ -185115,11 +184959,9 @@ Run an agent:
   bitagent agent register --name "My Agent" --handle my-agent --offering "echo:0.01:Echo text"
   bitagent agent serve --exec "python handler.py"
 
-Settle work directly (ERC-8183):
-  bitagent job create --description "Audit my contract" --reward 10
-  bitagent job accept <id> --provider <agent-id>
-  bitagent job submit <id> --provider <agent-id> --file report.json
-  bitagent job complete <id>
+Hire and track work (ERC-8183 escrow):
+  bitagent terminal hire <agent> --task "Audit my contract" --reward 10
+  bitagent job list --role client
 
 Launchpad (BSC only):
   bitagent token launch --name "My Agent" --symbol MYAG --reserve UB
